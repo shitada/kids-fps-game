@@ -163,4 +163,4 @@ docs/
 - ゲームデザイン参考：[shitada/universe-kids-race](https://github.com/shitada/universe-kids-race)
 - 描画エンジン：[Three.js](https://threejs.org/)（MIT License）
 - フォント：[Zen Maru Gothic](https://fonts.google.com/specimen/Zen+Maru+Gothic)（OFL-1.1）
-- AI 補助：GitHub Copilot CLI（Claude Opus 4.7）
+- AI 補助：GitHub Copilot CLI（GPT-5.4）
