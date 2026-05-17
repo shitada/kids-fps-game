@@ -17,6 +17,7 @@ import { AiSystem } from '@/game/systems/AiSystem';
 import { DIFFICULTY } from '@/game/config/difficulty';
 import { SafeZone } from '@/game/systems/SafeZone';
 import { InputManager } from '@/game/input/InputManager';
+import { battleTrackForMap } from '@/game/audio/AudioEngine';
 import { Hud } from '@/ui/Hud';
 
 const PLAYER_ID = 'player';
@@ -115,7 +116,7 @@ export class BattleScene implements GameScene {
       this.hud.showMessage(`📍 ${this.map.nameHiragana}`, 1500);
     }
 
-    ctx.audio.startBgm();
+    ctx.audio.startBgm(battleTrackForMap(this.map.id));
     this.startedAt = performance.now();
     this.lastFrame = performance.now();
     this.loop();

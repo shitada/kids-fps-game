@@ -6,6 +6,7 @@ export class SkinSelectScene implements GameScene {
   private el!: HTMLDivElement;
 
   enter(ctx: SceneContext): void {
+    ctx.audio.startBgm('skin-select');
     const el = document.createElement('div');
     el.style.cssText = `position:absolute;inset:0;background:linear-gradient(180deg,#fff5d6,#ffd6e0);display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:auto;color:#1a2540;`;
     const title = document.createElement('div');

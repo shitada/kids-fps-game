@@ -6,6 +6,7 @@ export class MapSelectScene implements GameScene {
   private el!: HTMLDivElement;
 
   enter(ctx: SceneContext): void {
+    ctx.audio.startBgm('map-select');
     const el = document.createElement('div');
     el.style.cssText = `position:absolute;inset:0;background:linear-gradient(180deg,#c8f7c5,#7fd1ff);display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:auto;color:#1a2540;`;
     const title = document.createElement('div');

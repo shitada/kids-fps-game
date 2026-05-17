@@ -12,6 +12,7 @@ export class ResultScene implements GameScene {
 
   enter(ctx: SceneContext): void {
     const r = this.result;
+    ctx.audio.startBgm(r.victory ? 'result-victory' : 'result-rank');
     const bg = r.victory ? 'linear-gradient(180deg,#fff59d,#ffb74d)' : 'linear-gradient(180deg,#b3e5fc,#80deea)';
     const el = document.createElement('div');
     el.style.cssText = `position:absolute;inset:0;background:${bg};display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:auto;color:#1a2540;font-family:'Zen Maru Gothic',sans-serif;`;

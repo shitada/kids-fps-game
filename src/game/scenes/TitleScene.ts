@@ -7,6 +7,7 @@ export class TitleScene implements GameScene {
 
   enter(ctx: SceneContext): void {
     this.ctx = ctx;
+    ctx.audio.startBgm('title');
     const el = document.createElement('div');
     el.style.cssText = `
       position:absolute;inset:0;display:flex;flex-direction:column;
