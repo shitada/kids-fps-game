@@ -1,4 +1,4 @@
-# Copilot 向けの指示
+# Copilot 向けの短い常時指示
 
 ## プロジェクト概要
 
@@ -14,17 +14,22 @@
 - Web Audio API（プログラマティック合成、外部音源不使用）
 - GitHub Pages + Actions でデプロイ
 
-## コーディング規約
+## 常時守る禁止事項
 
-- 子供向け UI 文言は **ひらがな中心**。漢字を使う場合はルビ（`<ruby>`）を必ず付ける。
-- ファイルパスのエイリアスは `@/...` （`src/` 配下）を使う。
+- 暴力表現・流血表現・リアル武器・悲鳴は入れない。
+- 課金・広告・外部通信・チャット・ユーザー間交流は入れない。
+- UI 文言は **ひらがな中心**。漢字を使う場合は必要に応じて `<ruby>` を使う。
 - `strict: true` 前提。`any` を増やさない。
-- 暴力表現・流血表現・課金・外部通信・チャットは一切入れない。
-- 過剰なコメントを避ける（自明な箇所はコメント不要）。
 
-## ディレクトリ
+## 詳細ルール
 
-`src/game/` 配下に `audio / config / effects / entities / input / scenes / storage / systems`。UI は `src/ui/`、型は `src/types/`、テストは `tests/`、外部資料は `docs/skills/`。
+長い実務ルールは常時コンテキストに入れず、用途別 Skill と custom agent に分ける。
+
+- 専用 custom agent: `.github/agents/splash-kids-game.agent.md`
+- 子供向け安全性・UX: `.github/skills/splash-kids-design-safety/SKILL.md`
+- TypeScript / ゲームシステム設計: `.github/skills/splash-kids-systems-architecture/SKILL.md`
+- Three.js / WebGL 性能: `.github/skills/splash-kids-webgl-performance/SKILL.md`
+- テスト・レビュー・ライセンス確認: `.github/skills/splash-kids-validation-workflow/SKILL.md`
 
 ## 開発手順
 

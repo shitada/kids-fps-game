@@ -127,6 +127,18 @@ docs/
 
 各社のドキュメント本文は著作権の関係でコピーせず、要約と公式 URL のみを掲載しています。
 
+### Copilot 用 Skill / Custom Agent
+
+重複する公式ガイドの要点は、Copilot が必要なときだけ参照できるように `.github/skills/` に用途別 Skill として整理しています。
+
+| ファイル | 目的 |
+| --- | --- |
+| `.github/agents/splash-kids-game.agent.md` | このゲーム専用の custom agent |
+| `.github/skills/splash-kids-design-safety/SKILL.md` | 子供向け安全性・UX・表現ルール |
+| `.github/skills/splash-kids-systems-architecture/SKILL.md` | TypeScript / ゲームシステム設計 |
+| `.github/skills/splash-kids-webgl-performance/SKILL.md` | Three.js / WebGL 性能 |
+| `.github/skills/splash-kids-validation-workflow/SKILL.md` | テスト・レビュー・ライセンス確認 |
+
 ---
 
 ## 🛡 安全とアクセシビリティ

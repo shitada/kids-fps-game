@@ -27,6 +27,18 @@ docs/skills/
 
 ## このプロジェクトでどう使うか
 
+実装時に Copilot が直接参照する実務ルールは、長い常時インストラクションではなく `.github/skills/` に用途別 Skill として整理しています。
+
+| Copilot カスタマイズ | 役割 |
+| --- | --- |
+| `.github/agents/splash-kids-game.agent.md` | スプラッシュキッズバトル専用の custom agent |
+| `.github/skills/splash-kids-design-safety/SKILL.md` | 子供向け安全性・UX・ゲーム表現 |
+| `.github/skills/splash-kids-systems-architecture/SKILL.md` | TypeScript strict・ゲームシステム設計 |
+| `.github/skills/splash-kids-webgl-performance/SKILL.md` | Three.js / WebGL / モバイル性能 |
+| `.github/skills/splash-kids-validation-workflow/SKILL.md` | テスト・レビュー・ライセンス・コミット前確認 |
+
+下記の企業別資料は、それら Skill の背景資料・出典集です。
+
 | シーン | 参考にしたガイド |
 | --- | --- |
 | ゲームの仕様作成 / 機能分割 | Anthropic「Skills」設計指針、Microsoft「Spec-driven development」 |
