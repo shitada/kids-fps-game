@@ -33,8 +33,10 @@ export class Hud {
   private build(): void {
     // 左下：ぬれ度ゲージ
     const hpWrap = document.createElement('div');
+    hpWrap.className = 'skb-hp';
     hpWrap.style.cssText = 'position:absolute;left:18px;bottom:18px;width:280px;';
     const label = document.createElement('div');
+    label.className = 'skb-hp-label';
     label.textContent = 'ぬれ度';
     label.style.cssText = 'font-size:18px;font-weight:700;margin-bottom:6px;';
     hpWrap.appendChild(label);
@@ -45,6 +47,7 @@ export class Hud {
     barOuter.appendChild(barInner);
     hpWrap.appendChild(barOuter);
     const hpText = document.createElement('div');
+    hpText.className = 'skb-hp-text';
     hpText.style.cssText = 'font-size:14px;margin-top:4px;';
     hpWrap.appendChild(hpText);
     this.el.appendChild(hpWrap);
@@ -53,11 +56,14 @@ export class Hud {
 
     // 右下：武器・弾数
     const weaponWrap = document.createElement('div');
+    weaponWrap.className = 'skb-weapon';
     weaponWrap.style.cssText = 'position:absolute;right:18px;bottom:18px;text-align:right;';
     const weaponName = document.createElement('div');
+    weaponName.className = 'skb-weapon-name';
     weaponName.style.cssText = 'font-size:22px;font-weight:700;';
     weaponWrap.appendChild(weaponName);
     const ammoText = document.createElement('div');
+    ammoText.className = 'skb-ammo';
     ammoText.style.cssText = 'font-size:36px;font-weight:900;';
     weaponWrap.appendChild(ammoText);
     this.el.appendChild(weaponWrap);
@@ -66,18 +72,21 @@ export class Hud {
 
     // 左上：素材
     const matWrap = document.createElement('div');
+    matWrap.className = 'skb-materials';
     matWrap.style.cssText = 'position:absolute;left:18px;top:18px;font-size:18px;font-weight:700;';
     this.el.appendChild(matWrap);
     this.materialsEl = matWrap;
 
     // 中央上：残り人数
     const remain = document.createElement('div');
+    remain.className = 'skb-remaining';
     remain.style.cssText = 'position:absolute;left:50%;top:18px;transform:translateX(-50%);font-size:18px;font-weight:700;background:rgba(0,0,0,0.35);padding:6px 14px;border-radius:14px;';
     this.el.appendChild(remain);
     this.remainingEl = remain;
 
     // 右上：モード（撃つ/つくる）
     const mode = document.createElement('div');
+    mode.className = 'skb-mode';
     mode.style.cssText = 'position:absolute;right:18px;top:18px;font-size:18px;font-weight:700;background:rgba(0,0,0,0.35);padding:6px 14px;border-radius:14px;';
     this.el.appendChild(mode);
     this.modeEl = mode;
@@ -90,6 +99,7 @@ export class Hud {
 
     // ゾーン警告
     const zone = document.createElement('div');
+    zone.className = 'skb-zone';
     zone.style.cssText = 'position:absolute;left:50%;top:60px;transform:translateX(-50%);font-size:16px;font-weight:700;color:#ff6f3c;background:rgba(0,0,0,0.45);padding:6px 12px;border-radius:10px;display:none;';
     zone.textContent = '☀️ そとはあぶないよ！なかにはいろう！';
     this.el.appendChild(zone);
@@ -97,6 +107,7 @@ export class Hud {
 
     // メッセージ
     const msg = document.createElement('div');
+    msg.className = 'skb-message';
     msg.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:36px;font-weight:900;color:#fff;background:rgba(0,0,0,0.4);padding:14px 24px;border-radius:18px;display:none;';
     this.el.appendChild(msg);
     this.messageEl = msg;

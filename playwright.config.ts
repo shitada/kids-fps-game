@@ -26,5 +26,11 @@ export default defineConfig({
         ...devices['iPad (gen 7) landscape'],
       },
     },
+    {
+      name: 'webkit-iphone',
+      use: {
+        ...devices['iPhone 13 landscape'],
+      },
+    },
   ],
 });

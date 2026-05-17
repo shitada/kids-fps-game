@@ -68,9 +68,10 @@ export class BattleScene implements GameScene {
 
     this.renderer = new THREE.WebGLRenderer({ canvas: ctx.canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
+    this.resizeRenderer();
 
-    this.camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 500);
+    const viewport = gameViewportSize();
+    this.camera = new THREE.PerspectiveCamera(72, viewport.width / viewport.height, 0.1, 500);
     const built = buildWorld(this.map);
     this.scene = built.scene;
     this.collision = built.collision;
@@ -103,14 +104,14 @@ export class BattleScene implements GameScene {
     this.input.attachTouch(ctx.rootEl);
 
     this.resizeHandler = () => {
-      this.renderer.setSize(window.innerWidth, window.innerHeight, false);
-      this.camera.aspect = window.innerWidth / window.innerHeight;
-      this.camera.updateProjectionMatrix();
+      this.resizeRenderer();
     };
     window.addEventListener('resize', this.resizeHandler);
+    window.visualViewport?.addEventListener('resize', this.resizeHandler);
 
     if (!ctx.save.tutorialSeen) {
-      this.hud.showMessage('💦 クリックでみる！うつ！', 3500);
+      const tutorial = navigator.maxTouchPoints > 0 ? 'みぎがわでみる！\n💦でうつ！' : '💦 クリックでみる！うつ！';
+      this.hud.showMessage(tutorial, 3500);
       ctx.saveUpdate({ tutorialSeen: true });
     } else {
       this.hud.showMessage(`📍 ${this.map.nameHiragana}`, 1500);
@@ -522,15 +523,14 @@ export class BattleScene implements GameScene {
 
   resize(): void {
     if (!this.renderer) return;
-    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
-    this.camera.aspect = window.innerWidth / window.innerHeight;
-    this.camera.updateProjectionMatrix();
+    this.resizeRenderer();
   }
 
   async exit(): Promise<void> {
     this.done = true;
     cancelAnimationFrame(this.rafId);
     window.removeEventListener('resize', this.resizeHandler);
+    window.visualViewport?.removeEventListener('resize', this.resizeHandler);
     this.input.detach();
     this.hud.destroy();
     this.projectiles.forEach((p) => disposeProjectile(this.scene, p));
@@ -538,4 +538,22 @@ export class BattleScene implements GameScene {
     if (document.pointerLockElement) document.exitPointerLock();
     this.renderer.dispose();
   }
+
+  private resizeRenderer(): void {
+    const viewport = gameViewportSize();
+    this.renderer.setSize(viewport.width, viewport.height, false);
+    if (this.camera) {
+      this.camera.aspect = viewport.width / viewport.height;
+      this.camera.updateProjectionMatrix();
+    }
+  }
+}
+
+function gameViewportSize(): { width: number; height: number } {
+  const width = window.visualViewport?.width ?? window.innerWidth;
+  const height = window.visualViewport?.height ?? window.innerHeight;
+  return {
+    width: Math.max(1, Math.round(width)),
+    height: Math.max(1, Math.round(height)),
+  };
 }
