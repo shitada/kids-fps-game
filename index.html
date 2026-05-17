@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="スプラッシュキッズバトル" />
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  <title>スプラッシュキッズバトル — Splash Kids Battle</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #87ceeb;
+      font-family: 'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', 'Yu Gothic', sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+      color: #1a2540;
+    }
+    #game-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+    #hud {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 10;
+      padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    }
+    #ui-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 20;
+      padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    }
+    #ui-overlay > * {
+      pointer-events: auto;
+    }
+    .crosshair {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 14px;
+      height: 14px;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      border: 2px solid rgba(255,255,255,0.9);
+      border-radius: 50%;
+      box-shadow: 0 0 0 2px rgba(0,0,0,0.2);
+    }
+  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;700;900&display=swap" rel="stylesheet">
+  <script type="module" crossorigin src="/kids-fps-game/assets/index-DtlYxA5g.js"></script>
+  <link rel="modulepreload" crossorigin href="/kids-fps-game/assets/three-iUMeNl0N.js">
+  <link rel="modulepreload" crossorigin href="/kids-fps-game/assets/game-core-LFLkqOsJ.js">
+  <link rel="modulepreload" crossorigin href="/kids-fps-game/assets/game-scenes-D3qt1NXM.js">
+</head>
+<body>
+  <canvas id="game-canvas"></canvas>
+  <div id="hud"></div>
+  <div id="ui-overlay"></div>
+  <script>document.addEventListener('contextmenu', function(e) { e.preventDefault(); });</script>
+</body>
+</html>
