@@ -12,6 +12,30 @@ describe('Agent', () => {
     expect(a.eliminated).toBe(false);
   });
 
+  it('syncs a richer humanoid visual without changing gameplay state', () => {
+    const a = new Agent('cpu-1', true, SKINS.usagi);
+    a.position.set(1, 0, 2);
+    a.velocity.set(3, 0, 4);
+    a.yaw = 0.5;
+    a.pitch = 0.2;
+    a.onGround = true;
+    a.loadout.hp = 50;
+
+    a.syncMesh(2);
+
+    expect(a.mesh.userData.kind).toBe('agent-visual');
+    expect(a.mesh.position.x).toBe(1);
+    expect(a.mesh.position.z).toBe(2);
+    expect(a.mesh.rotation.y).toBeCloseTo(0.5);
+    expect(a.mesh.visible).toBe(true);
+
+    let visibleWetDrops = 0;
+    a.mesh.traverse((obj) => {
+      if (obj.userData.kind === 'wet-drop' && obj.visible) visibleWetDrops += 1;
+    });
+    expect(visibleWetDrops).toBe(3);
+  });
+
   it('takeDamage decreases HP and returns true on elimination', () => {
     const a = new Agent('p1', false, SKINS.kuma);
     expect(a.takeDamage(30)).toBe(false);

@@ -271,7 +271,7 @@ export class BattleScene implements GameScene {
         const damage = this.safeZone.damagePerSecond * dt;
         if (a.takeDamage(damage)) this.onEliminated(a, null);
       }
-      a.syncMesh();
+      a.syncMesh(this.elapsed);
       this.updateAgentCollider(a);
     }
 

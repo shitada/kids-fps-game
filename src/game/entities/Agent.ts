@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { SkinConfig, WeaponId } from '@/types';
 import { WEAPONS, WEAPON_ORDER } from '@/game/config/weapons';
+import { AgentVisual, buildAgentMesh } from '@/game/entities/AgentVisual';
 
 export interface AgentLoadout {
   hp: number;
@@ -26,6 +27,7 @@ export class Agent {
   eliminations = 0;
   lastFireMs = 0;
   reloadingUntil = 0;
+  visual: AgentVisual;
   mesh: THREE.Group;
   radius = 0.5;
   height = 1.7;
@@ -44,7 +46,8 @@ export class Agent {
       stone: 30,
       hasWeapon: { 'water-gun': true, 'balloon-launcher': false, 'bubble-shower': false },
     };
-    this.mesh = buildAgentMesh(skin);
+    this.visual = new AgentVisual(skin);
+    this.mesh = this.visual.root;
   }
 
   get eyePosition(): THREE.Vector3 {
@@ -64,10 +67,17 @@ export class Agent {
     return new THREE.Vector3(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp).normalize();
   }
 
-  syncMesh(): void {
+  syncMesh(elapsedSec = 0): void {
     this.mesh.position.copy(this.position);
     this.mesh.rotation.y = this.yaw;
     this.mesh.visible = !this.eliminated;
+    this.visual.update({
+      elapsedSec,
+      moveSpeed: Math.hypot(this.velocity.x, this.velocity.z),
+      onGround: this.onGround,
+      aimPitch: this.pitch,
+      hpRatio: this.loadout.hp / this.loadout.hpMax,
+    });
   }
 
   takeDamage(amount: number): boolean {
@@ -107,45 +117,4 @@ export class Agent {
   }
 }
 
-export function buildAgentMesh(skin: SkinConfig): THREE.Group {
-  const group = new THREE.Group();
-  const bodyGeo = new THREE.BoxGeometry(0.9, 1.0, 0.6);
-  const bodyMat = new THREE.MeshLambertMaterial({ color: skin.color });
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.position.y = 0.7;
-  group.add(body);
-
-  const headGeo = new THREE.SphereGeometry(0.45, 16, 12);
-  const headMat = new THREE.MeshLambertMaterial({ color: skin.accent });
-  const head = new THREE.Mesh(headGeo, headMat);
-  head.position.y = 1.55;
-  group.add(head);
-
-  const eyeGeo = new THREE.SphereGeometry(0.06, 8, 6);
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
-  const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
-  eyeL.position.set(-0.13, 1.62, -0.4);
-  group.add(eyeL);
-  const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
-  eyeR.position.set(0.13, 1.62, -0.4);
-  group.add(eyeR);
-
-  const armGeo = new THREE.BoxGeometry(0.22, 0.7, 0.22);
-  const armL = new THREE.Mesh(armGeo, bodyMat);
-  armL.position.set(-0.58, 0.85, 0);
-  group.add(armL);
-  const armR = new THREE.Mesh(armGeo, bodyMat);
-  armR.position.set(0.58, 0.85, 0);
-  group.add(armR);
-
-  const legGeo = new THREE.BoxGeometry(0.3, 0.45, 0.3);
-  const legMat = new THREE.MeshLambertMaterial({ color: 0x444b66 });
-  const legL = new THREE.Mesh(legGeo, legMat);
-  legL.position.set(-0.22, 0.225, 0);
-  group.add(legL);
-  const legR = new THREE.Mesh(legGeo, legMat);
-  legR.position.set(0.22, 0.225, 0);
-  group.add(legR);
-
-  return group;
-}
+export { buildAgentMesh };
