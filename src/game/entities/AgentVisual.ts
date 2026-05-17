@@ -8,6 +8,7 @@ interface AgentVisualParts {
   rightArm: THREE.Group;
   leftLeg: THREE.Group;
   rightLeg: THREE.Group;
+  waterGun: THREE.Group;
   wetDrops: THREE.Mesh[];
 }
 
@@ -55,6 +56,7 @@ const materialCache = new Map<string, THREE.Material>();
 export class AgentVisual {
   readonly root: THREE.Group;
   private parts: AgentVisualParts;
+  private firePulseUntilSec = 0;
 
   constructor(skin: SkinConfig) {
     this.root = new THREE.Group();
@@ -78,9 +80,14 @@ export class AgentVisual {
 
     const aimRaise = 0.72 - THREE.MathUtils.clamp(state.aimPitch, -0.55, 0.55) * 0.35;
     this.parts.leftArm.rotation.x = aimRaise + swing * 0.16;
-    this.parts.rightArm.rotation.x = aimRaise - swing * 0.12;
+    const firePulse = THREE.MathUtils.clamp((this.firePulseUntilSec - state.elapsedSec) / 0.18, 0, 1);
+    const fireKick = Math.sin(firePulse * Math.PI);
+    this.parts.rightArm.position.z = -0.01 - fireKick * 0.08;
+    this.parts.rightArm.rotation.x = aimRaise - swing * 0.12 - fireKick * 0.22;
     this.parts.leftArm.rotation.z = 0.18;
     this.parts.rightArm.rotation.z = -0.18;
+    this.parts.waterGun.position.z = -0.15 - fireKick * 0.05;
+    this.parts.waterGun.scale.setScalar(1 + fireKick * 0.06);
 
     this.parts.head.rotation.x = THREE.MathUtils.clamp(-state.aimPitch * 0.25, -0.18, 0.18);
     this.parts.head.rotation.y = moving ? Math.sin(walkPhase * 0.5) * 0.04 : Math.sin(state.elapsedSec * 1.1) * 0.025;
@@ -91,6 +98,10 @@ export class AgentVisual {
       const mat = drop.material;
       if (mat instanceof THREE.MeshBasicMaterial) mat.opacity = wetOpacity;
     }
+  }
+
+  playFire(nowSec: number): void {
+    this.firePulseUntilSec = nowSec + 0.18;
   }
 }
 
@@ -133,7 +144,7 @@ function buildParts(root: THREE.Group, skin: SkinConfig): AgentVisualParts {
   leftArm.position.set(-0.36, 1.16, -0.01);
   rightArm.position.set(0.36, 1.16, -0.01);
   body.add(leftArm, rightArm);
-  addWaterGun(rightArm, skin);
+  const waterGun = addWaterGun(rightArm, skin);
 
   const leftLeg = makeLeg(-1, palette);
   const rightLeg = makeLeg(1, palette);
@@ -143,7 +154,7 @@ function buildParts(root: THREE.Group, skin: SkinConfig): AgentVisualParts {
 
   const wetDrops = addWetDrops(torso);
 
-  return { body, head, leftArm, rightArm, leftLeg, rightLeg, wetDrops };
+  return { body, head, leftArm, rightArm, leftLeg, rightLeg, waterGun, wetDrops };
 }
 
 function makeArm(side: -1 | 1, palette: SkinPalette): THREE.Group {
@@ -284,7 +295,7 @@ function addWaterPack(body: THREE.Group, skin: SkinConfig): void {
   }
 }
 
-function addWaterGun(rightArm: THREE.Group, skin: SkinConfig): void {
+function addWaterGun(rightArm: THREE.Group, skin: SkinConfig): THREE.Group {
   const gun = new THREE.Group();
   gun.position.set(0.02, -0.62, -0.15);
   gun.rotation.x = Math.PI * 0.5;
@@ -298,6 +309,40 @@ function addWaterGun(rightArm: THREE.Group, skin: SkinConfig): void {
   barrel.position.y = -0.24;
 
   gun.add(body, tank, barrel);
+  return gun;
+}
+
+export function createFirstPersonWaterGun(skin: SkinConfig): THREE.Group {
+  const gun = new THREE.Group();
+  gun.name = 'first-person-water-gun';
+  gun.visible = false;
+
+  const body = mesh(new THREE.BoxGeometry(0.26, 0.16, 0.34), lambert(skin.accent));
+  body.position.set(0, 0, 0);
+  gun.add(body);
+
+  const handle = mesh(new THREE.BoxGeometry(0.1, 0.26, 0.12), lambert(skin.color));
+  handle.position.set(0.03, -0.18, 0.08);
+  handle.rotation.x = -0.25;
+  gun.add(handle);
+
+  const tank = mesh(GEOMETRIES.waterGunTank, basic(0x9fe8ff, 0.82));
+  tank.position.set(-0.02, 0.11, 0.02);
+  tank.scale.set(1.25, 1.05, 1.25);
+  gun.add(tank);
+
+  const barrel = mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.48, 10), basic(0x4fc3f7));
+  barrel.rotation.x = Math.PI * 0.5;
+  barrel.position.set(0, 0.02, -0.35);
+  gun.add(barrel);
+
+  const nozzle = mesh(new THREE.SphereGeometry(0.055, 10, 8), basic(0xc9efff, 0.9));
+  nozzle.name = 'first-person-water-gun-nozzle';
+  nozzle.position.set(0, 0.02, -0.6);
+  nozzle.visible = false;
+  gun.add(nozzle);
+
+  return gun;
 }
 
 function addWetDrops(torso: THREE.Mesh): THREE.Mesh[] {

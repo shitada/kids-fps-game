@@ -119,10 +119,10 @@ export class Hud {
     this.hpText.textContent = `${Math.round(hp)} / ${max}`;
   }
 
-  setWeapon(w: WeaponId, ammo: number): void {
+  setWeapon(w: WeaponId, ammo: number, ammoMax = WEAPONS[w].ammoMax): void {
     const wc = WEAPONS[w];
     this.weaponEl.textContent = `${wc.emoji} ${wc.nameHiragana}`;
-    this.ammoEl.textContent = `${ammo} / ${wc.ammoMax}`;
+    this.ammoEl.textContent = `${ammo} / ${ammoMax}`;
   }
 
   setBuildMode(active: boolean, kind?: BuildPieceKind): void {

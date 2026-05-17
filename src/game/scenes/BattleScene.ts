@@ -5,6 +5,7 @@ import { getMapById } from '@/game/config/maps';
 import { buildWorld } from '@/game/systems/WorldBuilder';
 import { CollisionWorld, makeAABB, distanceXZ } from '@/game/systems/CollisionWorld';
 import { Agent } from '@/game/entities/Agent';
+import { createFirstPersonWaterGun } from '@/game/entities/AgentVisual';
 import { SKINS, SKIN_ORDER } from '@/game/config/skins';
 import { WEAPONS } from '@/game/config/weapons';
 import { BUILD_ORDER, BUILD_PIECES } from '@/game/config/build';
@@ -50,6 +51,9 @@ export class BattleScene implements GameScene {
   private buildKindIndex = 0;
   private buildYawIndex = 0;
   private buildPreview!: THREE.Mesh;
+  private firstPersonGun!: THREE.Group;
+  private firstPersonGunNozzle: THREE.Object3D | null = null;
+  private firstPersonGunUntil = 0;
   private elapsed = 0;
   private rafId = 0;
   private lastFrame = 0;
@@ -86,6 +90,12 @@ export class BattleScene implements GameScene {
 
     this.spawnAgents(diffParams.moveSpeed);
     this.spawnPickups();
+    this.scene.add(this.camera);
+    this.firstPersonGun = createFirstPersonWaterGun(this.player.skin);
+    this.firstPersonGun.position.set(0.36, -0.28, -0.78);
+    this.firstPersonGun.rotation.set(-0.12, -0.24, 0.05);
+    this.firstPersonGunNozzle = this.firstPersonGun.getObjectByName('first-person-water-gun-nozzle') ?? null;
+    this.camera.add(this.firstPersonGun);
 
     const previewGeo = new THREE.BoxGeometry(1, 1, 1);
     const previewMat = new THREE.MeshBasicMaterial({ color: 0x80d4ff, transparent: true, opacity: 0.45, wireframe: false });
@@ -95,7 +105,7 @@ export class BattleScene implements GameScene {
 
     this.hud = new Hud(ctx.rootEl);
     this.hud.setHp(this.player.loadout.hp, this.player.loadout.hpMax);
-    this.hud.setWeapon(this.player.loadout.weapon, this.player.loadout.ammo[this.player.loadout.weapon]);
+    this.hud.setWeapon(this.player.loadout.weapon, this.player.loadout.ammo[this.player.loadout.weapon], this.player.ammoMax(this.player.loadout.weapon));
     this.hud.setMaterials(this.player.loadout.wood, this.player.loadout.stone);
     this.hud.setRemaining(this.aliveCount(), this.agents.length);
     this.hud.setBuildMode(false);
@@ -127,7 +137,7 @@ export class BattleScene implements GameScene {
     const playerSkin = SKINS[this.ctx.save.selectedSkin];
     const spawnPoints = this.map.spawnPoints.slice();
     this.player = new Agent(PLAYER_ID, false, playerSkin);
-    this.player.speed = MOVE_SPEED;
+    this.player.applyBaseSpeed(MOVE_SPEED);
     const sp = spawnPoints.shift() ?? [0, 0];
     this.player.position.set(sp[0], 0.85, sp[1]);
     this.agents.push(this.player);
@@ -137,7 +147,7 @@ export class BattleScene implements GameScene {
     for (let i = 0; i < NUM_BOTS; i++) {
       const skin = SKINS[otherSkins[i % otherSkins.length]];
       const bot = new Agent(`cpu-${i}`, true, skin);
-      bot.speed = cpuSpeed;
+      bot.applyBaseSpeed(cpuSpeed);
       const point = spawnPoints[i % spawnPoints.length] ?? [(Math.random() - 0.5) * 50, (Math.random() - 0.5) * 50];
       bot.position.set(point[0], 0.85, point[1]);
       this.agents.push(bot);
@@ -330,6 +340,7 @@ export class BattleScene implements GameScene {
       const dir = this.player.lookDirection();
       this.camera.lookAt(eye.clone().add(dir));
       this.player.mesh.visible = false;
+      this.updateFirstPersonGun(now);
       if (this.buildMode) {
         const previewPos = eye.clone().add(this.player.lookDirection().setY(0).normalize().multiplyScalar(4));
         previewPos.y = 0;
@@ -350,13 +361,14 @@ export class BattleScene implements GameScene {
         this.buildPreview.visible = false;
       }
     } else {
+      if (this.firstPersonGun) this.firstPersonGun.visible = false;
       const t = this.elapsed * 0.3;
       this.camera.position.set(Math.cos(t) * 30, 35, Math.sin(t) * 30);
       this.camera.lookAt(0, 0, 0);
     }
 
     this.hud.setHp(this.player.loadout.hp, this.player.loadout.hpMax);
-    this.hud.setWeapon(this.player.loadout.weapon, this.player.loadout.ammo[this.player.loadout.weapon]);
+    this.hud.setWeapon(this.player.loadout.weapon, this.player.loadout.ammo[this.player.loadout.weapon], this.player.ammoMax(this.player.loadout.weapon));
     this.hud.setMaterials(this.player.loadout.wood, this.player.loadout.stone);
     this.hud.setRemaining(this.aliveCount(), this.agents.length);
     this.hud.setZoneWarning(this.safeZone.isOutside(this.player.position) && !this.player.eliminated);
@@ -376,13 +388,17 @@ export class BattleScene implements GameScene {
 
   private tryFire(a: Agent, dir: THREE.Vector3, now: number): void {
     const weapon = WEAPONS[a.loadout.weapon];
-    if (now < a.lastFireMs + weapon.cooldownMs) return;
+    if (now < a.lastFireMs + a.fireCooldownMs(a.loadout.weapon)) return;
     if (a.loadout.ammo[a.loadout.weapon] < weapon.ammoPerShot) {
       if (a.id === PLAYER_ID) this.hud.showMessage('💧 みずがない！タンクへ！', 1200);
       return;
     }
     a.lastFireMs = now;
     a.loadout.ammo[a.loadout.weapon] -= weapon.ammoPerShot;
+    a.playFireVisual(now / 1000);
+    if (a.id === PLAYER_ID && weapon.id === 'water-gun') {
+      this.firstPersonGunUntil = now + 260;
+    }
 
     const eye = a.eyePosition;
     const damageMult = a.isCpu ? DIFFICULTY[this.ctx.save.difficulty].damageMultiplier : 1;
@@ -545,6 +561,24 @@ export class BattleScene implements GameScene {
     if (this.camera) {
       this.camera.aspect = viewport.width / viewport.height;
       this.camera.updateProjectionMatrix();
+    }
+  }
+
+  private updateFirstPersonGun(now: number): void {
+    if (!this.firstPersonGun) return;
+    const pulse = Math.max(0, Math.min(1, (this.firstPersonGunUntil - now) / 260));
+    if (pulse <= 0) {
+      this.firstPersonGun.visible = false;
+      if (this.firstPersonGunNozzle) this.firstPersonGunNozzle.visible = false;
+      return;
+    }
+    const kick = Math.sin(pulse * Math.PI);
+    this.firstPersonGun.visible = true;
+    this.firstPersonGun.position.set(0.36 + kick * 0.02, -0.28 - kick * 0.02, -0.78 + kick * 0.12);
+    this.firstPersonGun.rotation.set(-0.12 - kick * 0.08, -0.24, 0.05 + kick * 0.04);
+    if (this.firstPersonGunNozzle) {
+      this.firstPersonGunNozzle.visible = pulse > 0.25;
+      this.firstPersonGunNozzle.scale.setScalar(1 + kick * 1.4);
     }
   }
 }

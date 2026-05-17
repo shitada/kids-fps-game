@@ -12,6 +12,20 @@ describe('Agent', () => {
     expect(a.eliminated).toBe(false);
   });
 
+  it('applies stronger skin abilities to agent stats', () => {
+    const base = new Agent('base', false, SKINS.kuma);
+    const strong = new Agent('strong', false, SKINS.sakana);
+
+    expect(strong.loadout.hpMax).toBeGreaterThan(base.loadout.hpMax);
+    expect(strong.ammoMax('water-gun')).toBeGreaterThan(base.ammoMax('water-gun'));
+    expect(strong.loadout.ammo['water-gun']).toBe(strong.ammoMax('water-gun'));
+    expect(strong.fireCooldownMs('water-gun')).toBeLessThan(base.fireCooldownMs('water-gun'));
+
+    base.applyBaseSpeed(10);
+    strong.applyBaseSpeed(10);
+    expect(strong.speed).toBeGreaterThan(base.speed);
+  });
+
   it('syncs a richer humanoid visual without changing gameplay state', () => {
     const a = new Agent('cpu-1', true, SKINS.usagi);
     a.position.set(1, 0, 2);

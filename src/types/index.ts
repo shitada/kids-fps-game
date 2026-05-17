@@ -43,12 +43,23 @@ export interface PickupConfig {
 
 export type SkinId = 'kuma' | 'usagi' | 'neko' | 'robo' | 'sakana';
 
+export interface SkinAbilityConfig {
+  hpBonus: number;
+  speedMultiplier: number;
+  waterAmmoBonus: number;
+  cooldownMultiplier: number;
+  materialBonus: number;
+}
+
 export interface SkinConfig {
   id: SkinId;
   nameHiragana: string;
   color: number;
   accent: number;
   unlockWins: number;
+  icon: string;
+  abilities: SkinAbilityConfig;
+  abilityLabels: string[];
 }
 
 export type Difficulty = 'easy' | 'normal' | 'hard';

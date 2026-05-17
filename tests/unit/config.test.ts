@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SKINS, SKIN_ORDER, isUnlocked } from '@/game/config/skins';
+import { SKINS, SKIN_ORDER, isUnlocked, skinPowerScore } from '@/game/config/skins';
 import { WEAPONS, WEAPON_ORDER } from '@/game/config/weapons';
 import { MAPS, getMapById } from '@/game/config/maps';
 import { BUILD_PIECES, BUILD_ORDER } from '@/game/config/build';
@@ -11,6 +11,15 @@ describe('config integrity', () => {
     for (const id of SKIN_ORDER) {
       expect(SKINS[id]).toBeDefined();
       expect(SKINS[id].nameHiragana.length).toBeGreaterThan(0);
+      expect(SKINS[id].icon.length).toBeGreaterThan(0);
+      expect(SKINS[id].abilityLabels.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('skin abilities get stronger from left to right', () => {
+    const scores = SKIN_ORDER.map((id) => skinPowerScore(SKINS[id]));
+    for (let i = 1; i < scores.length; i++) {
+      expect(scores[i]).toBeGreaterThan(scores[i - 1]);
     }
   });
 

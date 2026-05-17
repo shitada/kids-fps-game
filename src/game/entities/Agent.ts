@@ -37,13 +37,15 @@ export class Agent {
     this.id = id;
     this.isCpu = isCpu;
     this.skin = skin;
+    const hpMax = 100 + skin.abilities.hpBonus;
+    const waterMax = this.ammoMax('water-gun');
     this.loadout = {
-      hp: 100,
-      hpMax: 100,
+      hp: hpMax,
+      hpMax,
       weapon: 'water-gun',
-      ammo: { 'water-gun': WEAPONS['water-gun'].ammoMax, 'balloon-launcher': 0, 'bubble-shower': 0 },
-      wood: 30,
-      stone: 30,
+      ammo: { 'water-gun': waterMax, 'balloon-launcher': 0, 'bubble-shower': 0 },
+      wood: 30 + skin.abilities.materialBonus,
+      stone: 30 + skin.abilities.materialBonus,
       hasWeapon: { 'water-gun': true, 'balloon-launcher': false, 'bubble-shower': false },
     };
     this.visual = new AgentVisual(skin);
@@ -107,13 +109,29 @@ export class Agent {
 
   giveWeapon(w: WeaponId): void {
     this.loadout.hasWeapon[w] = true;
-    this.loadout.ammo[w] = WEAPONS[w].ammoMax;
+    this.loadout.ammo[w] = this.ammoMax(w);
     if (w !== 'water-gun') this.loadout.weapon = w;
   }
 
   refillWater(amount: number): void {
-    const cap = WEAPONS['water-gun'].ammoMax;
+    const cap = this.ammoMax('water-gun');
     this.loadout.ammo['water-gun'] = Math.min(cap, this.loadout.ammo['water-gun'] + amount);
+  }
+
+  ammoMax(w: WeaponId): number {
+    return WEAPONS[w].ammoMax + (w === 'water-gun' ? this.skin.abilities.waterAmmoBonus : 0);
+  }
+
+  fireCooldownMs(w: WeaponId): number {
+    return WEAPONS[w].cooldownMs * this.skin.abilities.cooldownMultiplier;
+  }
+
+  applyBaseSpeed(baseSpeed: number): void {
+    this.speed = baseSpeed * this.skin.abilities.speedMultiplier;
+  }
+
+  playFireVisual(nowSec: number): void {
+    this.visual.playFire(nowSec);
   }
 }
 
