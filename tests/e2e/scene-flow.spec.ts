@@ -25,7 +25,8 @@ test('mobile battle scene shows reusable touch controls', async ({ page, isMobil
   await page.getByRole('button', { name: /プールパーク/ }).click();
 
   await expect(page.locator('#touch-controls')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'うつ' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'うつ', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'ひだりうつ' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'とぶ' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'つくる' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'きりかえ' })).toBeVisible();

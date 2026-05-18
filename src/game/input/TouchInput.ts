@@ -15,6 +15,8 @@ interface TouchState {
   pause: boolean;
 }
 
+type FireButtonKind = 'left' | 'right';
+
 interface Joystick {
   baseX: number;
   baseY: number;
@@ -57,9 +59,12 @@ export class TouchInput implements InputSource {
   private lookPointerId: number | null = null;
   private lookLastX = 0;
   private lookLastY = 0;
+  private lookStartX = 0;
+  private lookStartY = 0;
+  private lookMoved = false;
   private listeners: Array<() => void> = [];
-  private fireBtn: HTMLElement | null = null;
-  private firePointerId: number | null = null;
+  private firePointerIds = new Set<number>();
+  private fireQueued = false;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -91,7 +96,9 @@ export class TouchInput implements InputSource {
 
     const fireBtn = this.makeActionButton('💦', 'うつ', layout, 0, 0);
     root.appendChild(fireBtn);
-    this.fireBtn = fireBtn;
+
+    const leftFireBtn = this.makeLeftFireButton(layout);
+    root.appendChild(leftFireBtn);
 
     const jumpBtn = this.makeActionButton('⬆️', 'とぶ', layout, 1, 1);
     root.appendChild(jumpBtn);
@@ -155,6 +162,9 @@ export class TouchInput implements InputSource {
       this.lookPointerId = e.pointerId;
       this.lookLastX = e.clientX;
       this.lookLastY = e.clientY;
+      this.lookStartX = e.clientX;
+      this.lookStartY = e.clientY;
+      this.lookMoved = false;
       rightArea.setPointerCapture(e.pointerId);
       e.preventDefault();
     };
@@ -162,35 +172,27 @@ export class TouchInput implements InputSource {
       if (this.lookPointerId !== e.pointerId) return;
       this.state.pointerDeltaX += (e.clientX - this.lookLastX) * 1.5;
       this.state.pointerDeltaY += (e.clientY - this.lookLastY) * 1.5;
+      if (Math.hypot(e.clientX - this.lookStartX, e.clientY - this.lookStartY) > 12) this.lookMoved = true;
       this.lookLastX = e.clientX;
       this.lookLastY = e.clientY;
       e.preventDefault();
     };
     const onLookUp = (e: PointerEvent) => {
       if (this.lookPointerId !== e.pointerId) return;
+      if (!this.lookMoved) this.fireQueued = true;
+      this.lookPointerId = null;
+    };
+    const onLookCancel = (e: PointerEvent) => {
+      if (this.lookPointerId !== e.pointerId) return;
       this.lookPointerId = null;
     };
     rightArea.addEventListener('pointerdown', onLookDown);
     rightArea.addEventListener('pointermove', onLookMove);
     rightArea.addEventListener('pointerup', onLookUp);
-    rightArea.addEventListener('pointercancel', onLookUp);
+    rightArea.addEventListener('pointercancel', onLookCancel);
 
-    const onFireDown = (e: PointerEvent) => {
-      this.state.fire = true;
-      this.firePointerId = e.pointerId;
-      fireBtn.setPointerCapture(e.pointerId);
-      e.preventDefault();
-      e.stopPropagation();
-    };
-    const onFireUp = (e: PointerEvent) => {
-      if (this.firePointerId === e.pointerId) {
-        this.state.fire = false;
-        this.firePointerId = null;
-      }
-    };
-    fireBtn.addEventListener('pointerdown', onFireDown);
-    fireBtn.addEventListener('pointerup', onFireUp);
-    fireBtn.addEventListener('pointercancel', onFireUp);
+    this.bindFireButton(fireBtn, 'right');
+    this.bindFireButton(leftFireBtn, 'left');
 
     jumpBtn.addEventListener('pointerdown', (e) => {
       this.state.jump = true;
@@ -213,13 +215,17 @@ export class TouchInput implements InputSource {
       rightArea.removeEventListener('pointerdown', onLookDown);
       rightArea.removeEventListener('pointermove', onLookMove);
       rightArea.removeEventListener('pointerup', onLookUp);
-      rightArea.removeEventListener('pointercancel', onLookUp);
+      rightArea.removeEventListener('pointercancel', onLookCancel);
     });
   }
 
   detach(): void {
     this.listeners.forEach((d) => d());
     this.listeners = [];
+    this.firePointerIds.clear();
+    this.state.fire = false;
+    this.fireQueued = false;
+    this.lookPointerId = null;
     if (this.root && this.root.parentElement) this.root.parentElement.removeChild(this.root);
     this.root = null;
   }
@@ -283,7 +289,7 @@ export class TouchInput implements InputSource {
     out.forward += this.state.forward;
     out.right += this.state.right;
     out.jump = out.jump || this.state.jump;
-    out.fire = out.fire || this.state.fire;
+    out.fire = out.fire || this.state.fire || this.fireQueued;
     out.reload = out.reload || this.state.reload;
     out.toggleBuild = out.toggleBuild || this.state.toggleBuild;
     if (this.state.buildIndex >= 0) out.buildIndex = this.state.buildIndex;
@@ -297,6 +303,84 @@ export class TouchInput implements InputSource {
     this.state.rotateBuild = false;
     this.state.pointerDeltaX = 0;
     this.state.pointerDeltaY = 0;
+    this.fireQueued = false;
+  }
+
+  private bindFireButton(button: HTMLElement, kind: FireButtonKind): void {
+    const onFireDown = (e: PointerEvent) => {
+      this.firePointerIds.add(e.pointerId);
+      this.state.fire = true;
+      this.fireQueued = true;
+      if (kind === 'right' && this.lookPointerId === null) {
+        this.lookPointerId = e.pointerId;
+        this.lookLastX = e.clientX;
+        this.lookLastY = e.clientY;
+        this.lookStartX = e.clientX;
+        this.lookStartY = e.clientY;
+        this.lookMoved = false;
+      }
+      button.setPointerCapture(e.pointerId);
+      button.style.background = 'rgba(201,239,255,0.96)';
+      button.style.boxShadow = '0 0 18px rgba(111,213,255,0.75), 0 2px 8px rgba(0,0,0,0.3)';
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const onFireMove = (e: PointerEvent) => {
+      if (kind !== 'right' || this.lookPointerId !== e.pointerId) return;
+      this.state.pointerDeltaX += (e.clientX - this.lookLastX) * 1.5;
+      this.state.pointerDeltaY += (e.clientY - this.lookLastY) * 1.5;
+      if (Math.hypot(e.clientX - this.lookStartX, e.clientY - this.lookStartY) > 12) this.lookMoved = true;
+      this.lookLastX = e.clientX;
+      this.lookLastY = e.clientY;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const onFireUp = (e: PointerEvent) => {
+      this.firePointerIds.delete(e.pointerId);
+      this.state.fire = this.firePointerIds.size > 0;
+      if (this.lookPointerId === e.pointerId) this.lookPointerId = null;
+      button.style.background = kind === 'right' ? 'rgba(255,255,255,0.85)' : 'rgba(201,239,255,0.88)';
+      button.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    button.addEventListener('pointerdown', onFireDown);
+    button.addEventListener('pointermove', onFireMove);
+    button.addEventListener('pointerup', onFireUp);
+    button.addEventListener('pointercancel', onFireUp);
+    this.listeners.push(() => {
+      button.removeEventListener('pointerdown', onFireDown);
+      button.removeEventListener('pointermove', onFireMove);
+      button.removeEventListener('pointerup', onFireUp);
+      button.removeEventListener('pointercancel', onFireUp);
+    });
+  }
+
+  private makeLeftFireButton(layout: TouchLayout): HTMLDivElement {
+    const el = document.createElement('div');
+    el.className = 'skb-action-btn skb-left-fire-btn';
+    el.setAttribute('role', 'button');
+    el.setAttribute('aria-label', 'ひだりうつ');
+    el.textContent = '💦';
+    const size = Math.round(layout.actionSize * 0.88);
+    const left = layout.joystickInset + layout.joystickSize + Math.round(layout.actionGap * 0.6);
+    const bottom = layout.joystickInset + Math.round(layout.joystickSize * 0.44);
+    el.style.cssText = `
+      position: absolute;
+      left: calc(${left}px + env(safe-area-inset-left, 0px));
+      bottom: calc(${bottom}px + env(safe-area-inset-bottom, 0px));
+      width: ${size}px; height: ${size}px;
+      border-radius: 50%;
+      background: rgba(201,239,255,0.88);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      pointer-events: auto;
+      touch-action: none;
+      display: flex; align-items: center; justify-content: center;
+      font-size: ${Math.round(layout.actionFont * 0.88)}px;
+      user-select: none;
+      -webkit-user-select: none;
+    `;
+    return el;
   }
 }
 
