@@ -3,6 +3,7 @@ export type SfxName =
   | 'balloon-shot'
   | 'bubble-shot'
   | 'splash'
+  | 'water-hit'
   | 'pickup'
   | 'build'
   | 'jump'
@@ -248,6 +249,16 @@ export class AudioEngine {
       case 'splash':
         this.playNoise(0.15, 0.18);
         return;
+      case 'water-hit':
+        this.playNoise(0.12, 0.12);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(520, now);
+        osc.frequency.exponentialRampToValueAtTime(780, now + 0.08);
+        gain.gain.setValueAtTime(0.12, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+        osc.start(now);
+        osc.stop(now + 0.14);
+        break;
       case 'pickup':
         osc.type = 'sine';
         osc.frequency.setValueAtTime(660, now);

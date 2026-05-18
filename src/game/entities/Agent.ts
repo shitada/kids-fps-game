@@ -133,6 +133,10 @@ export class Agent {
   playFireVisual(nowSec: number): void {
     this.visual.playFire(nowSec);
   }
+
+  playHitVisual(nowSec: number): void {
+    this.visual.playHit(nowSec);
+  }
 }
 
 export { buildAgentMesh };

@@ -50,6 +50,32 @@ describe('Agent', () => {
     expect(visibleWetDrops).toBe(3);
   });
 
+  it('shows a stronger water-gun firing visual during the fire pulse', () => {
+    const a = new Agent('cpu-1', true, SKINS.usagi);
+
+    a.playFireVisual(1);
+    a.syncMesh(1.15);
+
+    let muzzleVisible = false;
+    a.mesh.traverse((obj) => {
+      if (obj.userData.kind === 'muzzle-splash' && obj.visible) muzzleVisible = true;
+    });
+    expect(muzzleVisible).toBe(true);
+  });
+
+  it('shows wet feedback when hit even before HP drops are large', () => {
+    const a = new Agent('cpu-1', true, SKINS.neko);
+
+    a.playHitVisual(2);
+    a.syncMesh(2.16);
+
+    let visibleWetDrops = 0;
+    a.mesh.traverse((obj) => {
+      if (obj.userData.kind === 'wet-drop' && obj.visible) visibleWetDrops += 1;
+    });
+    expect(visibleWetDrops).toBe(3);
+  });
+
   it('takeDamage decreases HP and returns true on elimination', () => {
     const a = new Agent('p1', false, SKINS.kuma);
     expect(a.takeDamage(30)).toBe(false);

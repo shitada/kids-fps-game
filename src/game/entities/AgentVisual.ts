@@ -9,6 +9,7 @@ interface AgentVisualParts {
   leftLeg: THREE.Group;
   rightLeg: THREE.Group;
   waterGun: THREE.Group;
+  muzzleSplash: THREE.Group;
   wetDrops: THREE.Mesh[];
 }
 
@@ -52,11 +53,14 @@ const GEOMETRIES = {
 };
 
 const materialCache = new Map<string, THREE.Material>();
+const FIRE_VISUAL_DURATION_SEC = 0.3;
+const HIT_VISUAL_DURATION_SEC = 0.32;
 
 export class AgentVisual {
   readonly root: THREE.Group;
   private parts: AgentVisualParts;
   private firePulseUntilSec = 0;
+  private hitPulseUntilSec = 0;
 
   constructor(skin: SkinConfig) {
     this.root = new THREE.Group();
@@ -72,36 +76,51 @@ export class AgentVisual {
     const swing = moving ? Math.sin(walkPhase) * speedRatio : 0;
     const bob = moving ? Math.abs(Math.sin(walkPhase)) * 0.035 * speedRatio : Math.sin(state.elapsedSec * 2.2) * 0.01;
 
-    this.parts.body.position.y = bob;
+    const firePulse = THREE.MathUtils.clamp((this.firePulseUntilSec - state.elapsedSec) / FIRE_VISUAL_DURATION_SEC, 0, 1);
+    const fireKick = Math.sin(firePulse * Math.PI);
+    const hitPulse = THREE.MathUtils.clamp((this.hitPulseUntilSec - state.elapsedSec) / HIT_VISUAL_DURATION_SEC, 0, 1);
+    const hitKick = Math.sin(hitPulse * Math.PI);
+
+    this.parts.body.position.y = bob + hitKick * 0.07;
+    this.parts.body.rotation.x = -fireKick * 0.05 + hitKick * 0.08;
     this.parts.body.rotation.z = moving ? Math.sin(walkPhase) * 0.035 : Math.sin(state.elapsedSec * 1.4) * 0.015;
 
     this.parts.leftLeg.rotation.x = swing * 0.48;
     this.parts.rightLeg.rotation.x = -swing * 0.48;
 
     const aimRaise = 0.72 - THREE.MathUtils.clamp(state.aimPitch, -0.55, 0.55) * 0.35;
-    this.parts.leftArm.rotation.x = aimRaise + swing * 0.16;
-    const firePulse = THREE.MathUtils.clamp((this.firePulseUntilSec - state.elapsedSec) / 0.18, 0, 1);
-    const fireKick = Math.sin(firePulse * Math.PI);
+    this.parts.leftArm.position.z = -0.01 - fireKick * 0.05 + hitKick * 0.03;
+    this.parts.leftArm.rotation.x = aimRaise + swing * 0.16 - fireKick * 0.16 + hitKick * 0.18;
     this.parts.rightArm.position.z = -0.01 - fireKick * 0.08;
-    this.parts.rightArm.rotation.x = aimRaise - swing * 0.12 - fireKick * 0.22;
-    this.parts.leftArm.rotation.z = 0.18;
-    this.parts.rightArm.rotation.z = -0.18;
+    this.parts.rightArm.rotation.x = aimRaise - swing * 0.12 - fireKick * 0.42 + hitKick * 0.1;
+    this.parts.leftArm.rotation.z = 0.18 - fireKick * 0.14 + hitKick * 0.08;
+    this.parts.rightArm.rotation.z = -0.18 - fireKick * 0.08 - hitKick * 0.12;
     this.parts.waterGun.position.z = -0.15 - fireKick * 0.05;
-    this.parts.waterGun.scale.setScalar(1 + fireKick * 0.06);
+    this.parts.waterGun.scale.setScalar(1 + fireKick * 0.1);
+    this.parts.muzzleSplash.visible = fireKick > 0.05;
+    this.parts.muzzleSplash.scale.setScalar(0.7 + fireKick * 1.1);
 
-    this.parts.head.rotation.x = THREE.MathUtils.clamp(-state.aimPitch * 0.25, -0.18, 0.18);
-    this.parts.head.rotation.y = moving ? Math.sin(walkPhase * 0.5) * 0.04 : Math.sin(state.elapsedSec * 1.1) * 0.025;
+    this.parts.head.rotation.x = THREE.MathUtils.clamp(-state.aimPitch * 0.25 - hitKick * 0.08, -0.2, 0.2);
+    this.parts.head.rotation.y = (moving ? Math.sin(walkPhase * 0.5) * 0.04 : Math.sin(state.elapsedSec * 1.1) * 0.025) + hitKick * 0.08;
 
-    const wetOpacity = THREE.MathUtils.clamp((1 - state.hpRatio) * 1.4, 0, 0.75);
+    const wetOpacity = THREE.MathUtils.clamp((1 - state.hpRatio) * 1.4 + hitKick * 0.45, 0, 0.9);
     for (const drop of this.parts.wetDrops) {
       drop.visible = wetOpacity > 0.05;
       const mat = drop.material;
       if (mat instanceof THREE.MeshBasicMaterial) mat.opacity = wetOpacity;
+      const baseScale = drop.userData.baseScale;
+      if (baseScale instanceof THREE.Vector3) {
+        drop.scale.set(baseScale.x * (1 + hitKick * 0.35), baseScale.y * (1 + hitKick * 0.35), baseScale.z * (1 + hitKick * 0.35));
+      }
     }
   }
 
   playFire(nowSec: number): void {
-    this.firePulseUntilSec = nowSec + 0.18;
+    this.firePulseUntilSec = nowSec + FIRE_VISUAL_DURATION_SEC;
+  }
+
+  playHit(nowSec: number): void {
+    this.hitPulseUntilSec = nowSec + HIT_VISUAL_DURATION_SEC;
   }
 }
 
@@ -144,7 +163,7 @@ function buildParts(root: THREE.Group, skin: SkinConfig): AgentVisualParts {
   leftArm.position.set(-0.36, 1.16, -0.01);
   rightArm.position.set(0.36, 1.16, -0.01);
   body.add(leftArm, rightArm);
-  const waterGun = addWaterGun(rightArm, skin);
+  const { waterGun, muzzleSplash } = addWaterGun(rightArm, skin);
 
   const leftLeg = makeLeg(-1, palette);
   const rightLeg = makeLeg(1, palette);
@@ -154,7 +173,7 @@ function buildParts(root: THREE.Group, skin: SkinConfig): AgentVisualParts {
 
   const wetDrops = addWetDrops(torso);
 
-  return { body, head, leftArm, rightArm, leftLeg, rightLeg, waterGun, wetDrops };
+  return { body, head, leftArm, rightArm, leftLeg, rightLeg, waterGun, muzzleSplash, wetDrops };
 }
 
 function makeArm(side: -1 | 1, palette: SkinPalette): THREE.Group {
@@ -295,7 +314,7 @@ function addWaterPack(body: THREE.Group, skin: SkinConfig): void {
   }
 }
 
-function addWaterGun(rightArm: THREE.Group, skin: SkinConfig): THREE.Group {
+function addWaterGun(rightArm: THREE.Group, skin: SkinConfig): { waterGun: THREE.Group; muzzleSplash: THREE.Group } {
   const gun = new THREE.Group();
   gun.position.set(0.02, -0.62, -0.15);
   gun.rotation.x = Math.PI * 0.5;
@@ -308,8 +327,35 @@ function addWaterGun(rightArm: THREE.Group, skin: SkinConfig): THREE.Group {
   const barrel = mesh(GEOMETRIES.waterGunBarrel, basic(0x4fc3f7));
   barrel.position.y = -0.24;
 
-  gun.add(body, tank, barrel);
-  return gun;
+  const muzzleSplash = makeMuzzleSplash();
+  muzzleSplash.position.y = -0.48;
+  muzzleSplash.visible = false;
+
+  gun.add(body, tank, barrel, muzzleSplash);
+  return { waterGun: gun, muzzleSplash };
+}
+
+function makeMuzzleSplash(): THREE.Group {
+  const splash = new THREE.Group();
+  splash.userData.kind = 'muzzle-splash';
+
+  const center = mesh(new THREE.SphereGeometry(0.085, 8, 6), basic(0xe9fbff, 0.9));
+  splash.add(center);
+
+  const dropMat = basic(0x9fe8ff, 0.82);
+  const offsets: Array<[number, number, number, number]> = [
+    [-0.08, -0.03, 0.02, 0.55],
+    [0.08, -0.04, -0.01, 0.5],
+    [0, -0.1, 0.04, 0.45],
+  ];
+  for (const [x, y, z, scale] of offsets) {
+    const drop = mesh(GEOMETRIES.waterDrop, dropMat);
+    drop.position.set(x, y, z);
+    drop.scale.setScalar(scale);
+    splash.add(drop);
+  }
+
+  return splash;
 }
 
 export function createFirstPersonWaterGun(skin: SkinConfig): THREE.Group {
@@ -358,6 +404,7 @@ function addWetDrops(torso: THREE.Mesh): THREE.Mesh[] {
     const drop = mesh(GEOMETRIES.waterDrop, mat);
     drop.position.set(x, y, z);
     drop.scale.set(0.8 * scale, 1.25 * scale, 0.45 * scale);
+    drop.userData.baseScale = drop.scale.clone();
     drop.userData.kind = 'wet-drop';
     drop.visible = false;
     torso.add(drop);

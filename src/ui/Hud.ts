@@ -15,7 +15,10 @@ export class Hud {
   private crosshair!: HTMLDivElement;
   private zoneEl!: HTMLDivElement;
   private messageEl!: HTMLDivElement;
+  private hitFlashEl!: HTMLDivElement;
+  private hitTextEl!: HTMLDivElement;
   private messageTimer: number | null = null;
+  private hitTimer: number | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -111,6 +114,23 @@ export class Hud {
     msg.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:36px;font-weight:900;color:#fff;background:rgba(0,0,0,0.4);padding:14px 24px;border-radius:18px;display:none;';
     this.el.appendChild(msg);
     this.messageEl = msg;
+
+    // みずがあたった時の短いフィードバック
+    const hitFlash = document.createElement('div');
+    hitFlash.className = 'skb-hit-flash';
+    hitFlash.style.cssText = `
+      position:absolute;inset:0;opacity:0;transition:opacity 0.16s ease-out;
+      background:radial-gradient(circle at center, rgba(255,255,255,0.5), rgba(111,213,255,0.24) 24%, rgba(79,195,247,0.12) 52%, transparent 74%);
+    `;
+    this.el.appendChild(hitFlash);
+    this.hitFlashEl = hitFlash;
+
+    const hitText = document.createElement('div');
+    hitText.className = 'skb-hit-text';
+    hitText.textContent = 'びしょっ！';
+    hitText.style.cssText = 'position:absolute;left:50%;top:42%;transform:translate(-50%,-50%) scale(0.92);font-size:30px;font-weight:900;color:#e9fbff;background:rgba(0,89,140,0.36);padding:10px 18px;border-radius:16px;opacity:0;transition:opacity 0.16s ease-out, transform 0.16s ease-out;';
+    this.el.appendChild(hitText);
+    this.hitTextEl = hitText;
   }
 
   setHp(hp: number, max: number): void {
@@ -158,12 +178,25 @@ export class Hud {
     }, durationMs);
   }
 
+  showHitFeedback(durationMs = 480): void {
+    this.hitFlashEl.style.opacity = '1';
+    this.hitTextEl.style.opacity = '1';
+    this.hitTextEl.style.transform = 'translate(-50%,-50%) scale(1)';
+    if (this.hitTimer) window.clearTimeout(this.hitTimer);
+    this.hitTimer = window.setTimeout(() => {
+      this.hitFlashEl.style.opacity = '0';
+      this.hitTextEl.style.opacity = '0';
+      this.hitTextEl.style.transform = 'translate(-50%,-50%) scale(0.92)';
+    }, durationMs);
+  }
+
   setCrosshair(visible: boolean): void {
     this.crosshair.style.display = visible ? 'block' : 'none';
   }
 
   destroy(): void {
     if (this.messageTimer) window.clearTimeout(this.messageTimer);
+    if (this.hitTimer) window.clearTimeout(this.hitTimer);
     if (this.el.parentElement) this.el.parentElement.removeChild(this.el);
   }
 }

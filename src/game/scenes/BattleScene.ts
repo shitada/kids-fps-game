@@ -12,7 +12,7 @@ import { BUILD_ORDER, BUILD_PIECES } from '@/game/config/build';
 import { PICKUPS } from '@/game/config/pickups';
 import { BuildManager } from '@/game/entities/BuildPiece';
 import { createPickup, setPickupAvailable, refreshPickupRotation, type Pickup } from '@/game/entities/Pickup';
-import { spawnProjectile, disposeProjectile, type Projectile } from '@/game/entities/Projectile';
+import { spawnProjectile, disposeProjectile, syncProjectileVisual, type Projectile } from '@/game/entities/Projectile';
 import { WaterSplashPool } from '@/game/effects/WaterSplash';
 import { AiSystem } from '@/game/systems/AiSystem';
 import { DIFFICULTY } from '@/game/config/difficulty';
@@ -54,6 +54,9 @@ export class BattleScene implements GameScene {
   private firstPersonGun!: THREE.Group;
   private firstPersonGunNozzle: THREE.Object3D | null = null;
   private firstPersonGunUntil = 0;
+  private cameraWobbleUntil = 0;
+  private cameraWobbleStart = 0;
+  private cameraWobbleStrength = 0;
   private elapsed = 0;
   private rafId = 0;
   private lastFrame = 0;
@@ -311,7 +314,7 @@ export class BattleScene implements GameScene {
       pr.velocity.y -= pr.gravity * dt;
       const prev = pr.position.clone();
       pr.position.add(pr.velocity.clone().multiplyScalar(dt));
-      pr.mesh.position.copy(pr.position);
+      syncProjectileVisual(pr);
       const segDir = pr.position.clone().sub(prev);
       const segLen = segDir.length();
       if (segLen > 0) {
@@ -337,6 +340,7 @@ export class BattleScene implements GameScene {
     if (!this.player.eliminated) {
       const eye = this.player.eyePosition;
       this.camera.position.copy(eye);
+      this.applyCameraWobble(now);
       const dir = this.player.lookDirection();
       this.camera.lookAt(eye.clone().add(dir));
       this.player.mesh.visible = false;
@@ -401,6 +405,7 @@ export class BattleScene implements GameScene {
     }
 
     const eye = a.eyePosition;
+    if (a.isCpu) this.splash.burst(eye.clone().add(dir.clone().multiplyScalar(0.75)), 3, 2.2);
     const damageMult = a.isCpu ? DIFFICULTY[this.ctx.save.difficulty].damageMultiplier : 1;
     for (let i = 0; i < weapon.pellets; i++) {
       const spread = new THREE.Vector3(
@@ -425,14 +430,11 @@ export class BattleScene implements GameScene {
   private onProjectileHit(pr: Projectile, point: THREE.Vector3, hitColliderId: string): void {
     this.splash.burst(point, 10, 5);
     this.ctx.audio.playSfx('splash');
+    const reactedAgents = new Set<string>();
 
     const agent = this.agents.find((a) => this.collisionByAgent.get(a.id) === hitColliderId);
     if (agent) {
-      if (agent.takeDamage(pr.damage)) {
-        const attacker = this.agents.find((a) => a.id === pr.attackerId) ?? null;
-        if (attacker && attacker.id !== agent.id) attacker.eliminations += 1;
-        this.onEliminated(agent, attacker);
-      }
+      this.applyProjectileDamage(agent, pr.damage, pr.attackerId, point, reactedAgents);
     } else if (hitColliderId.startsWith('build-')) {
       this.build.damagePiece(hitColliderId, pr.damage);
     }
@@ -443,14 +445,44 @@ export class BattleScene implements GameScene {
         const d = a.position.distanceTo(point);
         if (d <= pr.splashRadius) {
           const falloff = 1 - d / pr.splashRadius;
-          if (a.takeDamage(pr.damage * 0.5 * falloff)) {
-            const attacker = this.agents.find((x) => x.id === pr.attackerId) ?? null;
-            if (attacker && attacker.id !== a.id) attacker.eliminations += 1;
-            this.onEliminated(a, attacker);
-          }
+          this.applyProjectileDamage(a, pr.damage * 0.5 * falloff, pr.attackerId, point, reactedAgents);
         }
       }
     }
+  }
+
+  private applyProjectileDamage(agent: Agent, damage: number, attackerId: string, point: THREE.Vector3, reactedAgents: Set<string>): void {
+    if (agent.eliminated) return;
+    const attacker = this.agents.find((a) => a.id === attackerId) ?? null;
+    if (!reactedAgents.has(agent.id)) {
+      agent.playHitVisual(this.elapsed);
+      const splashPoint = agent.position.clone();
+      splashPoint.y += 1;
+      this.splash.burst(splashPoint.lerp(point, 0.35), agent.id === PLAYER_ID ? 8 : 5, agent.id === PLAYER_ID ? 4 : 3);
+      if (agent.id === PLAYER_ID && attackerId !== PLAYER_ID) this.showPlayerHitFeedback();
+      reactedAgents.add(agent.id);
+    }
+    if (agent.takeDamage(damage)) {
+      if (attacker && attacker.id !== agent.id) attacker.eliminations += 1;
+      this.onEliminated(agent, attacker);
+    }
+  }
+
+  private showPlayerHitFeedback(): void {
+    this.hud.showHitFeedback();
+    this.hud.showMessage('💦 みずが あたった！', 850);
+    this.ctx.audio.playSfx('water-hit');
+    this.cameraWobbleStart = performance.now();
+    this.cameraWobbleUntil = this.cameraWobbleStart + 260;
+    this.cameraWobbleStrength = 0.07;
+  }
+
+  private applyCameraWobble(now: number): void {
+    if (now >= this.cameraWobbleUntil) return;
+    const remaining = (this.cameraWobbleUntil - now) / Math.max(1, this.cameraWobbleUntil - this.cameraWobbleStart);
+    const strength = this.cameraWobbleStrength * remaining;
+    this.camera.position.x += Math.sin(now * 0.055) * strength;
+    this.camera.position.y += Math.cos(now * 0.071) * strength * 0.55;
   }
 
   private onEliminated(victim: Agent, attacker: Agent | null): void {
@@ -577,7 +609,7 @@ export class BattleScene implements GameScene {
     this.firstPersonGun.position.set(0.36 + kick * 0.02, -0.28 - kick * 0.02, -0.78 + kick * 0.12);
     this.firstPersonGun.rotation.set(-0.12 - kick * 0.08, -0.24, 0.05 + kick * 0.04);
     if (this.firstPersonGunNozzle) {
-      this.firstPersonGunNozzle.visible = pulse > 0.25;
+      this.firstPersonGunNozzle.visible = pulse > 0.1;
       this.firstPersonGunNozzle.scale.setScalar(1 + kick * 1.4);
     }
   }
