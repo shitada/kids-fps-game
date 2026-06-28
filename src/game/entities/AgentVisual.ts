@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SkinConfig, SkinId } from '@/types';
+import { disposeObject3D } from '@/game/util/dispose';
 
 interface AgentVisualParts {
   body: THREE.Group;
@@ -53,8 +54,22 @@ const GEOMETRIES = {
 };
 
 const materialCache = new Map<string, THREE.Material>();
+const SHARED_GEOMETRIES: ReadonlySet<THREE.BufferGeometry> = new Set(Object.values(GEOMETRIES));
 const FIRE_VISUAL_DURATION_SEC = 0.3;
 const HIT_VISUAL_DURATION_SEC = 0.32;
+
+/**
+ * エージェントや一人称ガンのサブツリーを破棄する。
+ * モジュール共有の GEOMETRIES / materialCache は次のバトルでも再利用するため
+ * 破棄対象から除外し、そのキャラ専用に生成されたジオメトリ／マテリアルのみ dispose する。
+ */
+export function disposeAgentResources(root: THREE.Object3D): void {
+  const sharedMaterials = new Set<THREE.Material>(materialCache.values());
+  disposeObject3D(root, (resource) => {
+    if (resource instanceof THREE.BufferGeometry) return SHARED_GEOMETRIES.has(resource);
+    return sharedMaterials.has(resource);
+  });
+}
 
 export class AgentVisual {
   readonly root: THREE.Group;

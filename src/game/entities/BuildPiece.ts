@@ -130,6 +130,12 @@ export class BuildManager {
     const p = this.pieces.get(id);
     if (!p) return;
     this.scene.remove(p.mesh);
+    p.mesh.geometry.dispose();
+    if (Array.isArray(p.mesh.material)) {
+      for (const m of p.mesh.material) m.dispose();
+    } else {
+      p.mesh.material.dispose();
+    }
     this.collision.remove(p.colliderId);
     this.pieces.delete(id);
   }

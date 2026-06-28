@@ -72,3 +72,14 @@ export function refreshPickupRotation(pickup: Pickup, dt: number): void {
   pickup.mesh.rotation.y += dt * 1.2;
   pickup.mesh.position.y = pickup.position.y + Math.sin(performance.now() / 400) * 0.1;
 }
+
+/** ピックアップの mesh をシーンから外し、ジオメトリ／マテリアルを破棄する。 */
+export function disposePickup(scene: THREE.Scene, pickup: Pickup): void {
+  scene.remove(pickup.mesh);
+  pickup.mesh.geometry.dispose();
+  if (Array.isArray(pickup.mesh.material)) {
+    for (const m of pickup.mesh.material) m.dispose();
+  } else {
+    pickup.mesh.material.dispose();
+  }
+}
