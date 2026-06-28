@@ -5,13 +5,13 @@ import { getMapById } from '@/game/config/maps';
 import { buildWorld } from '@/game/systems/WorldBuilder';
 import { CollisionWorld, makeAABB, distanceXZ } from '@/game/systems/CollisionWorld';
 import { Agent } from '@/game/entities/Agent';
-import { createFirstPersonWaterGun } from '@/game/entities/AgentVisual';
+import { createFirstPersonWaterGun, disposeAgentResources } from '@/game/entities/AgentVisual';
 import { SKINS, SKIN_ORDER } from '@/game/config/skins';
 import { WEAPONS } from '@/game/config/weapons';
 import { BUILD_ORDER, BUILD_PIECES } from '@/game/config/build';
 import { PICKUPS } from '@/game/config/pickups';
 import { BuildManager } from '@/game/entities/BuildPiece';
-import { createPickup, setPickupAvailable, refreshPickupRotation, type Pickup } from '@/game/entities/Pickup';
+import { createPickup, setPickupAvailable, refreshPickupRotation, disposePickup, type Pickup } from '@/game/entities/Pickup';
 import { spawnProjectile, disposeProjectile, syncProjectileVisual, type Projectile } from '@/game/entities/Projectile';
 import { WaterSplashPool } from '@/game/effects/WaterSplash';
 import { AiSystem } from '@/game/systems/AiSystem';
@@ -19,6 +19,7 @@ import { DIFFICULTY } from '@/game/config/difficulty';
 import { SafeZone } from '@/game/systems/SafeZone';
 import { InputManager } from '@/game/input/InputManager';
 import { battleTrackForMap } from '@/game/audio/AudioEngine';
+import { disposeObject3D } from '@/game/util/dispose';
 import { Hud } from '@/ui/Hud';
 
 const PLAYER_ID = 'player';
@@ -47,6 +48,9 @@ export class BattleScene implements GameScene {
   private splash!: WaterSplashPool;
   private ai!: AiSystem;
   private safeZone!: SafeZone;
+  private disposeWorld: (() => void) | null = null;
+  private eliminationClouds = new Set<THREE.Object3D>();
+  private eliminationTimers = new Set<ReturnType<typeof setTimeout>>();
   private buildMode = false;
   private buildKindIndex = 0;
   private buildYawIndex = 0;
@@ -82,6 +86,7 @@ export class BattleScene implements GameScene {
     const built = buildWorld(this.map);
     this.scene = built.scene;
     this.collision = built.collision;
+    this.disposeWorld = built.dispose;
 
     this.build = new BuildManager(this.scene, this.collision);
     this.splash = new WaterSplashPool(this.scene);
@@ -494,12 +499,23 @@ export class BattleScene implements GameScene {
     cloud.position.copy(victim.position);
     cloud.position.y += 1;
     this.scene.add(cloud);
-    setTimeout(() => this.scene.remove(cloud), 1200);
+    this.eliminationClouds.add(cloud);
+    const timer = setTimeout(() => {
+      this.eliminationTimers.delete(timer);
+      this.removeEliminationCloud(cloud);
+    }, 1200);
+    this.eliminationTimers.add(timer);
     if (victim.id === PLAYER_ID) {
       this.hud.showMessage('💦 びしょぬれ！\n かんせんモード', 2000);
     } else if (attacker?.id === PLAYER_ID) {
       this.hud.showMessage(`🎯 ${victim.skin.nameHiragana} を びしょぬれ！`, 1200);
     }
+  }
+
+  private removeEliminationCloud(cloud: THREE.Object3D): void {
+    if (!this.eliminationClouds.delete(cloud)) return;
+    this.scene.remove(cloud);
+    disposeObject3D(cloud);
   }
 
   private applyPickup(a: Agent, p: Pickup): void {
@@ -581,8 +597,45 @@ export class BattleScene implements GameScene {
     window.visualViewport?.removeEventListener('resize', this.resizeHandler);
     this.input.detach();
     this.hud.destroy();
+
+    // 飛んでいる弾を破棄
     this.projectiles.forEach((p) => disposeProjectile(this.scene, p));
+    this.projectiles.length = 0;
+
+    // 建築ピース（ジオメトリ／マテリアルも破棄）
     this.build.clear();
+
+    // ピックアップ
+    this.pickups.forEach((p) => disposePickup(this.scene, p));
+    this.pickups.length = 0;
+
+    // エージェント（共有リソースは除外してこのバトル固有分のみ破棄）
+    this.agents.forEach((a) => a.dispose());
+    this.agents.length = 0;
+
+    // 一人称ガン
+    if (this.firstPersonGun) {
+      this.camera.remove(this.firstPersonGun);
+      disposeAgentResources(this.firstPersonGun);
+    }
+
+    // 建築プレビュー
+    if (this.buildPreview) {
+      this.scene.remove(this.buildPreview);
+      disposeObject3D(this.buildPreview);
+    }
+
+    // 残っている退場エフェクトのタイマーと雲
+    this.eliminationTimers.forEach((t) => clearTimeout(t));
+    this.eliminationTimers.clear();
+    Array.from(this.eliminationClouds).forEach((cloud) => this.removeEliminationCloud(cloud));
+
+    // セーフゾーン・飛沫プール・ワールド（地面・雲・装飾）
+    this.safeZone.dispose();
+    this.splash.dispose();
+    this.disposeWorld?.();
+    this.disposeWorld = null;
+
     if (document.pointerLockElement) document.exitPointerLock();
     this.renderer.dispose();
   }

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { SkinConfig, WeaponId } from '@/types';
 import { WEAPONS, WEAPON_ORDER } from '@/game/config/weapons';
-import { AgentVisual, buildAgentMesh } from '@/game/entities/AgentVisual';
+import { AgentVisual, buildAgentMesh, disposeAgentResources } from '@/game/entities/AgentVisual';
 
 export interface AgentLoadout {
   hp: number;
@@ -136,6 +136,11 @@ export class Agent {
 
   playHitVisual(nowSec: number): void {
     this.visual.playHit(nowSec);
+  }
+
+  /** このエージェント専用に生成された Three.js リソースを破棄する（共有リソースは除外）。 */
+  dispose(): void {
+    disposeAgentResources(this.mesh);
   }
 }
 

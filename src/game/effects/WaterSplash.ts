@@ -44,4 +44,15 @@ export class WaterSplashPool {
       }
     }
   }
+
+  /** 飛沫プール全体のリソース（生存中の粒子・基底ジオメトリ／マテリアル）を破棄する。 */
+  dispose(): void {
+    for (const p of this.active) {
+      this.scene.remove(p.mesh);
+      (p.mesh.material as THREE.Material).dispose();
+    }
+    this.active.length = 0;
+    this.geo.dispose();
+    this.mat.dispose();
+  }
 }

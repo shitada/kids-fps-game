@@ -37,4 +37,14 @@ export class SafeZone {
     const dz = p.z - this.center.z;
     return Math.hypot(dx, dz) > this.radius;
   }
+
+  /** リングのジオメトリ／マテリアルを破棄する。 */
+  dispose(): void {
+    this.visual.geometry.dispose();
+    if (Array.isArray(this.visual.material)) {
+      for (const m of this.visual.material) m.dispose();
+    } else {
+      this.visual.material.dispose();
+    }
+  }
 }

@@ -1,17 +1,22 @@
 import * as THREE from 'three';
 import type { Decoration, MapConfig } from '@/types';
 import { CollisionWorld, makeAABB } from '@/game/systems/CollisionWorld';
+import { disposeObject3D } from '@/game/util/dispose';
 
 export interface BuiltWorld {
   scene: THREE.Scene;
   collision: CollisionWorld;
   ground: THREE.Mesh;
+  /** ワールド生成で確保した固有リソース（地面・雲・装飾）を破棄する。 */
+  dispose: () => void;
 }
 
 export function buildWorld(map: MapConfig): BuiltWorld {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(map.skyColor);
   scene.fog = new THREE.Fog(map.skyColor, 60, 160);
+
+  const ownedMeshes: THREE.Mesh[] = [];
 
   const hemi = new THREE.HemisphereLight(0xffffff, map.groundColor, 0.9);
   scene.add(hemi);
@@ -25,6 +30,7 @@ export function buildWorld(map: MapConfig): BuiltWorld {
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = 0;
   scene.add(ground);
+  ownedMeshes.push(ground);
 
   // ふんわりした雲も配置
   for (let i = 0; i < 10; i++) {
@@ -36,6 +42,7 @@ export function buildWorld(map: MapConfig): BuiltWorld {
     cloud.position.set(Math.cos(angle) * (map.sizeMeters * 0.9), 30 + Math.random() * 8, Math.sin(angle) * (map.sizeMeters * 0.9));
     cloud.scale.y = 0.6;
     scene.add(cloud);
+    ownedMeshes.push(cloud);
   }
 
   const collision = new CollisionWorld();
@@ -43,6 +50,7 @@ export function buildWorld(map: MapConfig): BuiltWorld {
   map.decorations.forEach((d, idx) => {
     const mesh = buildDecorationMesh(d);
     scene.add(mesh);
+    ownedMeshes.push(mesh);
     const center = new THREE.Vector3(d.position[0], d.position[1], d.position[2]);
     const size = new THREE.Vector3(d.size[0], d.size[1], d.size[2]);
     collision.add({
@@ -74,7 +82,15 @@ export function buildWorld(map: MapConfig): BuiltWorld {
     });
   });
 
-  return { scene, collision, ground };
+  const dispose = (): void => {
+    for (const mesh of ownedMeshes) {
+      scene.remove(mesh);
+      disposeObject3D(mesh);
+    }
+    ownedMeshes.length = 0;
+  };
+
+  return { scene, collision, ground, dispose };
 }
 
 function buildDecorationMesh(d: Decoration): THREE.Mesh {
