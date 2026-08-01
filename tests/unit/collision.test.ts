@@ -106,3 +106,49 @@ describe('CollisionWorld capsule resolution', () => {
     expect(hit!.collider.id).toBe('other');
   });
 });
+
+describe('CollisionWorld.updateAabb', () => {
+  it('moves an existing collider without recreating it', () => {
+    const world = new CollisionWorld();
+    world.add({
+      id: 'agent-player',
+      aabb: makeAABB(new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 2, 1)),
+      blocksMovement: false,
+      blocksProjectile: true,
+    });
+
+    const before = world.get('agent-player');
+    expect(before).toBeDefined();
+
+    const moved = world.updateAabb('agent-player', new THREE.Vector3(10, 1, 4), new THREE.Vector3(1, 2, 1));
+    expect(moved).toBe(true);
+
+    const after = world.get('agent-player');
+    expect(after).toBe(before);
+    expect(after!.aabb.min.x).toBeCloseTo(9.5);
+    expect(after!.aabb.max.x).toBeCloseTo(10.5);
+    expect(after!.aabb.min.z).toBeCloseTo(3.5);
+    expect(after!.aabb.max.y).toBeCloseTo(2);
+  });
+
+  it('returns false for unknown ids', () => {
+    const world = new CollisionWorld();
+    expect(world.updateAabb('nope', new THREE.Vector3(), new THREE.Vector3(1, 1, 1))).toBe(false);
+  });
+
+  it('keeps raycasts in sync with the moved collider', () => {
+    const world = new CollisionWorld();
+    world.add({
+      id: 'target',
+      aabb: makeAABB(new THREE.Vector3(0, 1, -5), new THREE.Vector3(2, 2, 2)),
+      blocksMovement: false,
+      blocksProjectile: true,
+    });
+    const origin = new THREE.Vector3(0, 1, 0);
+    const dir = new THREE.Vector3(0, 0, -1);
+    expect(world.raycast(origin, dir, 20)).not.toBeNull();
+
+    world.updateAabb('target', new THREE.Vector3(30, 1, -5), new THREE.Vector3(2, 2, 2));
+    expect(world.raycast(origin, dir, 20)).toBeNull();
+  });
+});

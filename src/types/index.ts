@@ -19,6 +19,10 @@ export interface WeaponConfig {
   splashRadius: number;
   pellets: number;
   spreadRad: number;
+  /** せなかのタンクから自動で回復する量（1びょうあたり）。0 なら回復しない。 */
+  refillPerSecond: number;
+  /** 撃つのをやめてから回復が始まるまでの時間（ミリびょう） */
+  refillDelayMs: number;
 }
 
 export type BuildPieceKind = 'wall' | 'floor' | 'stair';
@@ -69,7 +73,11 @@ export interface MapConfig {
   nameHiragana: string;
   emoji: string;
   groundColor: number;
+  /** 地面のまだら模様に使う 2 色目。省略時は groundColor から自動生成する。 */
+  groundAccentColor?: number;
   skyColor: number;
+  /** 天頂の空の色。地平線側は skyColor を使う。 */
+  skyTopColor?: number;
   sizeMeters: number;
   spawnPoints: Array<[number, number]>;
   waterTanks: Array<[number, number]>;
@@ -77,6 +85,8 @@ export interface MapConfig {
   woodNodes: Array<[number, number]>;
   stoneNodes: Array<[number, number]>;
   decorations: Decoration[];
+  /** InstancedMesh でばらまく小物。見た目のにぎやかさ用で当たり判定は持たない。 */
+  scatter?: ScatterGroup[];
 }
 
 export interface Decoration {
@@ -84,6 +94,20 @@ export interface Decoration {
   position: [number, number, number];
   size: [number, number, number];
   color: number;
+}
+
+export type ScatterKind = 'tree' | 'bush' | 'flower' | 'ball' | 'floaty' | 'cloudlet';
+
+export interface ScatterGroup {
+  kind: ScatterKind;
+  count: number;
+  color: number;
+  /** 中心からの配置半径（min, max） */
+  radius: [number, number];
+  /** 個体ごとのスケール倍率（min, max） */
+  scale: [number, number];
+  /** 配置する高さ。省略時は地面（0）。 */
+  height?: number;
 }
 
 export interface SaveData {

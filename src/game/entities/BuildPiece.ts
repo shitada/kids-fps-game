@@ -2,33 +2,75 @@ import * as THREE from 'three';
 import type { BuildPieceKind } from '@/types';
 import { BUILD_PIECES, BUILD_PIECE_SIZE } from '@/game/config/build';
 import { CollisionWorld, makeAABB } from '@/game/systems/CollisionWorld';
+import { disposeObject3D } from '@/game/systems/disposeObject';
 
 export interface BuildPiece {
   id: string;
   kind: BuildPieceKind;
   hp: number;
   ownerId: string;
-  mesh: THREE.Mesh;
+  mesh: THREE.Object3D;
   colliderId: string;
 }
 
 let buildCounter = 0;
 
-function meshFor(kind: BuildPieceKind, ownerColor: number): THREE.Mesh {
-  let geo: THREE.BufferGeometry;
-  switch (kind) {
-    case 'wall':
-      geo = new THREE.BoxGeometry(BUILD_PIECE_SIZE, BUILD_PIECE_SIZE, 0.4);
-      break;
-    case 'floor':
-      geo = new THREE.BoxGeometry(BUILD_PIECE_SIZE, 0.4, BUILD_PIECE_SIZE);
-      break;
-    case 'stair':
-      geo = new THREE.ConeGeometry(BUILD_PIECE_SIZE / 2, BUILD_PIECE_SIZE, 4);
-      break;
-  }
+function meshFor(kind: BuildPieceKind, ownerColor: number): THREE.Object3D {
   const mat = new THREE.MeshLambertMaterial({ color: ownerColor });
-  return new THREE.Mesh(geo, mat);
+  const trimColor = new THREE.Color(ownerColor).lerp(new THREE.Color(0xffffff), 0.45).getHex();
+  const trimMat = new THREE.MeshLambertMaterial({ color: trimColor });
+
+  switch (kind) {
+    case 'wall': {
+      const group = new THREE.Group();
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(BUILD_PIECE_SIZE, BUILD_PIECE_SIZE, 0.4), mat);
+      group.add(panel);
+      // わくを付けると「じぶんが作ったもの」が見て分かりやすい
+      const frameThickness = 0.28;
+      const top = new THREE.Mesh(new THREE.BoxGeometry(BUILD_PIECE_SIZE, frameThickness, 0.46), trimMat);
+      top.position.y = BUILD_PIECE_SIZE / 2 - frameThickness / 2;
+      const bottom = top.clone();
+      bottom.position.y = -top.position.y;
+      const left = new THREE.Mesh(new THREE.BoxGeometry(frameThickness, BUILD_PIECE_SIZE, 0.46), trimMat);
+      left.position.x = -BUILD_PIECE_SIZE / 2 + frameThickness / 2;
+      const right = left.clone();
+      right.position.x = -left.position.x;
+      group.add(top, bottom, left, right);
+      return group;
+    }
+    case 'floor': {
+      const group = new THREE.Group();
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(BUILD_PIECE_SIZE, 0.4, BUILD_PIECE_SIZE), mat);
+      group.add(slab);
+      const plankCount = 4;
+      for (let i = 0; i < plankCount; i++) {
+        const plank = new THREE.Mesh(new THREE.BoxGeometry(BUILD_PIECE_SIZE * 0.92, 0.1, 0.16), trimMat);
+        plank.position.set(0, 0.22, -BUILD_PIECE_SIZE / 2 + ((i + 0.5) * BUILD_PIECE_SIZE) / plankCount);
+        group.add(plank);
+      }
+      return group;
+    }
+    case 'stair': {
+      // かいだんは「のぼれる形」に見えるよう、実際に段を作る
+      const group = new THREE.Group();
+      const steps = 4;
+      const stepHeight = BUILD_PIECE_SIZE / steps;
+      const stepDepth = BUILD_PIECE_SIZE / steps;
+      for (let i = 0; i < steps; i++) {
+        const step = new THREE.Mesh(
+          new THREE.BoxGeometry(BUILD_PIECE_SIZE, stepHeight * (i + 1), stepDepth),
+          i % 2 === 0 ? mat : trimMat,
+        );
+        step.position.set(
+          0,
+          -BUILD_PIECE_SIZE / 2 + (stepHeight * (i + 1)) / 2,
+          BUILD_PIECE_SIZE / 2 - stepDepth * (i + 0.5),
+        );
+        group.add(step);
+      }
+      return group;
+    }
+  }
 }
 
 export function snapToGrid(pos: THREE.Vector3): THREE.Vector3 {
@@ -67,6 +109,16 @@ export class BuildManager {
   constructor(scene: THREE.Scene, collision: CollisionWorld) {
     this.scene = scene;
     this.collision = collision;
+  }
+
+  /** そこに置けるか（素材は見ない）。プレビューの色分けに使う。 */
+  isBlocked(kind: BuildPieceKind, centerCandidate: THREE.Vector3, yawIndex: number): boolean {
+    const { center, size } = placePieceAabb(kind, centerCandidate, yawIndex);
+    const aabb = makeAABB(center, size);
+    for (const c of this.collision.movingColliders()) {
+      if (aabbIntersect(aabb, c.aabb)) return true;
+    }
+    return false;
   }
 
   tryPlace(
@@ -130,6 +182,8 @@ export class BuildManager {
     const p = this.pieces.get(id);
     if (!p) return;
     this.scene.remove(p.mesh);
+    // ピースはグループなので、中のジオメトリ／マテリアルもまとめて破棄する
+    disposeObject3D(p.mesh);
     this.collision.remove(p.colliderId);
     this.pieces.delete(id);
   }

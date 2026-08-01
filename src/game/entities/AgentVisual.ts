@@ -53,6 +53,15 @@ const GEOMETRIES = {
 };
 
 const materialCache = new Map<string, THREE.Material>();
+
+/**
+ * 残り時間の割合（1 = 撃った瞬間、0 = 演出おわり）を、
+ * 「撃った瞬間がいちばん強く、そこから減衰する」量に変換する。
+ * sin(pulse * PI) にすると撃った瞬間が 0 になり、演出が遅れて見える。
+ */
+function easeOutKick(pulse: number): number {
+  return pulse * (2 - pulse);
+}
 const FIRE_VISUAL_DURATION_SEC = 0.3;
 const HIT_VISUAL_DURATION_SEC = 0.32;
 
@@ -77,9 +86,9 @@ export class AgentVisual {
     const bob = moving ? Math.abs(Math.sin(walkPhase)) * 0.035 * speedRatio : Math.sin(state.elapsedSec * 2.2) * 0.01;
 
     const firePulse = THREE.MathUtils.clamp((this.firePulseUntilSec - state.elapsedSec) / FIRE_VISUAL_DURATION_SEC, 0, 1);
-    const fireKick = Math.sin(firePulse * Math.PI);
+    const fireKick = easeOutKick(firePulse);
     const hitPulse = THREE.MathUtils.clamp((this.hitPulseUntilSec - state.elapsedSec) / HIT_VISUAL_DURATION_SEC, 0, 1);
-    const hitKick = Math.sin(hitPulse * Math.PI);
+    const hitKick = easeOutKick(hitPulse);
 
     this.parts.body.position.y = bob + hitKick * 0.07;
     this.parts.body.rotation.x = -fireKick * 0.05 + hitKick * 0.08;
@@ -363,28 +372,43 @@ export function createFirstPersonWaterGun(skin: SkinConfig): THREE.Group {
   gun.name = 'first-person-water-gun';
   gun.visible = false;
 
-  const body = mesh(new THREE.BoxGeometry(0.26, 0.16, 0.34), lambert(skin.accent));
-  body.position.set(0, 0, 0);
+  // 一人称で見たときに「みずでっぽうを持っている」と分かる形にする。
+  // 画面を占領しないよう、本体は小さめでノズルだけ前に出す。
+  const body = mesh(new THREE.BoxGeometry(0.15, 0.13, 0.3), lambert(skin.accent));
+  body.position.set(0, 0, -0.02);
   gun.add(body);
 
-  const handle = mesh(new THREE.BoxGeometry(0.1, 0.26, 0.12), lambert(skin.color));
-  handle.position.set(0.03, -0.18, 0.08);
-  handle.rotation.x = -0.25;
-  gun.add(handle);
+  const grip = mesh(new THREE.BoxGeometry(0.08, 0.2, 0.1), lambert(skin.color));
+  grip.position.set(0, -0.15, 0.07);
+  grip.rotation.x = -0.22;
+  gun.add(grip);
 
-  const tank = mesh(GEOMETRIES.waterGunTank, basic(0x9fe8ff, 0.82));
-  tank.position.set(-0.02, 0.11, 0.02);
-  tank.scale.set(1.25, 1.05, 1.25);
+  const trigger = mesh(new THREE.BoxGeometry(0.03, 0.06, 0.03), basic(0xffffff, 0.9));
+  trigger.position.set(0, -0.07, 0.01);
+  gun.add(trigger);
+
+  const tank = mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.2, 12), basic(0x9fe8ff, 0.85));
+  tank.rotation.x = Math.PI * 0.5;
+  tank.position.set(0, 0.1, 0.02);
   gun.add(tank);
 
-  const barrel = mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.48, 10), basic(0x4fc3f7));
+  const tankCap = mesh(new THREE.SphereGeometry(0.055, 10, 8), basic(0xe9fbff, 0.9));
+  tankCap.position.set(0, 0.1, -0.09);
+  gun.add(tankCap);
+
+  const barrel = mesh(new THREE.CylinderGeometry(0.028, 0.032, 0.34, 10), basic(0x4fc3f7));
   barrel.rotation.x = Math.PI * 0.5;
-  barrel.position.set(0, 0.02, -0.35);
+  barrel.position.set(0, 0.012, -0.32);
   gun.add(barrel);
 
-  const nozzle = mesh(new THREE.SphereGeometry(0.055, 10, 8), basic(0xc9efff, 0.9));
+  const muzzle = mesh(new THREE.CylinderGeometry(0.045, 0.036, 0.06, 10), lambert(skin.accent));
+  muzzle.rotation.x = Math.PI * 0.5;
+  muzzle.position.set(0, 0.012, -0.5);
+  gun.add(muzzle);
+
+  const nozzle = mesh(new THREE.SphereGeometry(0.05, 10, 8), basic(0xd9f6ff, 0.85));
   nozzle.name = 'first-person-water-gun-nozzle';
-  nozzle.position.set(0, 0.02, -0.6);
+  nozzle.position.set(0, 0.012, -0.56);
   nozzle.visible = false;
   gun.add(nozzle);
 

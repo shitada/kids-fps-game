@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Agent } from '@/game/entities/Agent';
+import { agentColliderId } from '@/game/entities/Agent';
 import type { CollisionWorld } from '@/game/systems/CollisionWorld';
 import type { Pickup } from '@/game/entities/Pickup';
 import type { DifficultyParams } from '@/game/config/difficulty';
@@ -188,19 +189,26 @@ export class AiSystem {
   }
 }
 
+/**
+ * 撃つ相手が見えているか。
+ * コライダー ID は `agent-<id>` 形式なので、自分と相手のぶんは無視して判定する。
+ * ここを取りちがえると「自分の当たり判定」で遮られたと誤判定して、
+ * CPU がほとんど撃たなくなる。
+ */
 function lineOfSight(
   from: THREE.Vector3,
   to: THREE.Vector3,
   collision: CollisionWorld,
-  ignoreA: string,
-  ignoreB: string,
+  shooterId: string,
+  targetId: string,
 ): boolean {
   const dir = to.clone().sub(from);
   const dist = dir.length();
+  if (dist < 0.001) return true;
   dir.normalize();
-  const hit = collision.raycast(from, dir, dist, undefined);
+  const hit = collision.raycast(from, dir, dist, agentColliderId(shooterId));
   if (!hit) return true;
-  if (hit.collider.id === ignoreA || hit.collider.id === ignoreB) return true;
+  if (hit.collider.id === agentColliderId(targetId)) return true;
   return hit.distance >= dist - 0.4;
 }
 

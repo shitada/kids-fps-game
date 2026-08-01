@@ -59,6 +59,22 @@ export class CollisionWorld {
     if (idx >= 0) this.colliders.splice(idx, 1);
   }
 
+  get(id: string): Collider | undefined {
+    return this.byId.get(id);
+  }
+
+  /** 既存コライダーの AABB をその場で更新する（毎フレーム動くキャラ用）。 */
+  updateAabb(id: string, center: THREE.Vector3, size: THREE.Vector3): boolean {
+    const c = this.byId.get(id);
+    if (!c) return false;
+    const hx = size.x * 0.5;
+    const hy = size.y * 0.5;
+    const hz = size.z * 0.5;
+    c.aabb.min.set(center.x - hx, center.y - hy, center.z - hz);
+    c.aabb.max.set(center.x + hx, center.y + hy, center.z + hz);
+    return true;
+  }
+
   clear(): void {
     this.colliders = [];
     this.byId.clear();

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SKINS } from '@/game/config/skins';
 import { WEAPONS } from '@/game/config/weapons';
-import { Agent } from '@/game/entities/Agent';
+import { Agent, agentColliderId } from '@/game/entities/Agent';
 
 describe('Agent', () => {
   it('starts with full HP and water gun loaded', () => {
@@ -122,5 +122,82 @@ describe('Agent', () => {
     a.pitch = -0.3;
     const d = a.lookDirection();
     expect(d.length()).toBeCloseTo(1, 5);
+  });
+});
+
+describe('Agent water regeneration', () => {
+  it('refills the water gun after the delay', () => {
+    const a = new Agent('p', false, SKINS.kuma);
+    a.loadout.ammo['water-gun'] = 0;
+    a.lastFireMs = 1000;
+    a.regenAmmo(0.5, 1200);
+    expect(a.loadout.ammo['water-gun']).toBe(0);
+    a.regenAmmo(1, 3000);
+    expect(a.loadout.ammo['water-gun']).toBeGreaterThan(0);
+  });
+
+  it('never exceeds the ammo cap', () => {
+    const a = new Agent('p', false, SKINS.kuma);
+    const cap = a.ammoMax('water-gun');
+    a.loadout.ammo['water-gun'] = cap;
+    a.regenAmmo(10, 100000);
+    expect(a.loadout.ammo['water-gun']).toBe(cap);
+  });
+
+  it('does not regenerate the special weapons', () => {
+    const a = new Agent('p', false, SKINS.kuma);
+    a.giveWeapon('balloon-launcher');
+    a.loadout.ammo['balloon-launcher'] = 0;
+    a.regenAmmo(10, 100000);
+    expect(a.loadout.ammo['balloon-launcher']).toBe(0);
+  });
+
+  it('accumulates fractional refills instead of losing them', () => {
+    const a = new Agent('p', false, SKINS.kuma);
+    a.loadout.ammo['water-gun'] = 0;
+    a.lastFireMs = 0;
+    for (let i = 0; i < 10; i++) a.regenAmmo(0.1, 5000);
+    expect(a.loadout.ammo['water-gun']).toBe(6);
+  });
+});
+
+describe('agentColliderId', () => {
+  it('prefixes agent ids consistently', () => {
+    expect(agentColliderId('player')).toBe('agent-player');
+    expect(agentColliderId('cpu-3')).toBe('agent-cpu-3');
+  });
+});
+
+describe('Agent fire visual', () => {
+  const findMuzzleSplash = (a: Agent) => {
+    let found: { visible: boolean } | null = null;
+    a.mesh.traverse((obj) => {
+      if (obj.userData.kind === 'muzzle-splash') found = obj as unknown as { visible: boolean };
+    });
+    return found as { visible: boolean } | null;
+  };
+
+  it('shows the muzzle splash when fire and sync use the same clock', () => {
+    const a = new Agent('p', false, SKINS.kuma);
+    const nowSec = 12.5;
+    a.playFireVisual(nowSec);
+    a.syncMesh(nowSec);
+    const splash = findMuzzleSplash(a);
+    expect(splash).not.toBeNull();
+    expect(splash!.visible).toBe(true);
+  });
+
+  it('hides the muzzle splash again after the pulse ends', () => {
+    const a = new Agent('p', false, SKINS.kuma);
+    a.playFireVisual(12.5);
+    a.syncMesh(12.5);
+    a.syncMesh(13.5);
+    expect(findMuzzleSplash(a)!.visible).toBe(false);
+  });
+
+  it('does not show the muzzle splash when nothing was fired', () => {
+    const a = new Agent('p', false, SKINS.kuma);
+    a.syncMesh(4);
+    expect(findMuzzleSplash(a)!.visible).toBe(false);
   });
 });

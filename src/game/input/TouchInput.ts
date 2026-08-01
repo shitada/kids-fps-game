@@ -1,5 +1,6 @@
 import type { InputState } from '@/types';
 import type { InputSource } from './InputSource';
+import { isTouchDevice } from './touchDevice';
 
 interface TouchState {
   forward: number;
@@ -14,8 +15,6 @@ interface TouchState {
   pointerDeltaY: number;
   pause: boolean;
 }
-
-type FireButtonKind = 'left' | 'right';
 
 interface Joystick {
   baseX: number;
@@ -32,12 +31,22 @@ interface TouchLayout {
   joystickKnob: number;
   joystickInset: number;
   joystickTravel: number;
+  fireSize: number;
   actionSize: number;
   actionFont: number;
-  actionRight: number;
-  actionBottom: number;
-  actionGap: number;
+  edgeInset: number;
+  gap: number;
+  lookSensitivity: number;
 }
+
+type ActionId = 'jump' | 'build' | 'swap' | 'rotate';
+
+const ACTION_LABELS: Record<ActionId, { icon: string; aria: string }> = {
+  jump: { icon: '⬆️', aria: 'とぶ' },
+  build: { icon: '🔨', aria: 'つくる' },
+  swap: { icon: '🔄', aria: 'きりかえ' },
+  rotate: { icon: '↩️', aria: 'むきをかえる' },
+};
 
 export class TouchInput implements InputSource {
   private container: HTMLElement;
@@ -65,14 +74,16 @@ export class TouchInput implements InputSource {
   private listeners: Array<() => void> = [];
   private firePointerIds = new Set<number>();
   private fireQueued = false;
+  private lookSensitivity = 1;
 
   constructor(container: HTMLElement) {
     this.container = container;
   }
 
   attach(): void {
-    if (!('ontouchstart' in window) && !navigator.maxTouchPoints) return;
+    if (!isTouchDevice()) return;
     const layout = getTouchLayout();
+    this.lookSensitivity = layout.lookSensitivity;
 
     const root = document.createElement('div');
     root.id = 'touch-controls';
@@ -87,27 +98,38 @@ export class TouchInput implements InputSource {
     leftBase.appendChild(leftKnob);
     root.appendChild(leftBase);
 
-    const rightArea = document.createElement('div');
-    rightArea.style.cssText = `
-      position: absolute; right: 0; top: 0; width: ${layout.compact ? 58 : 55}%; height: 100%;
+    // 視点ドラッグ領域。ボタン類と重ならないよう、画面下のボタン帯と
+    // 右上のおやすみボタンのぶんだけよける。
+    const lookArea = document.createElement('div');
+    lookArea.id = 'touch-look-area';
+    lookArea.style.cssText = `
+      position: absolute; right: 0; top: ${layout.edgeInset + layout.actionSize}px; width: 62%;
+      height: calc(100% - ${layout.fireSize + layout.edgeInset + layout.gap + layout.edgeInset + layout.actionSize}px);
       pointer-events: auto; touch-action: none;
     `;
-    root.appendChild(rightArea);
+    root.appendChild(lookArea);
 
-    const fireBtn = this.makeActionButton('💦', 'うつ', layout, 0, 0);
+    // メインの「うつ」ボタンは右下すみ。HUD の弾数表示とは重ならない位置に置く。
+    const fireBtn = this.makeFireButton(layout);
     root.appendChild(fireBtn);
 
-    const leftFireBtn = this.makeLeftFireButton(layout);
-    root.appendChild(leftFireBtn);
+    // アクションはうつボタンの左に横一列。押し間違いを減らす。
+    const actionRow = document.createElement('div');
+    actionRow.className = 'skb-action-row';
+    actionRow.style.cssText = `
+      position: absolute;
+      right: calc(${layout.edgeInset + layout.fireSize + layout.gap}px + env(safe-area-inset-right, 0px));
+      bottom: calc(${layout.edgeInset + Math.round((layout.fireSize - layout.actionSize) / 2)}px + env(safe-area-inset-bottom, 0px));
+      display: flex; flex-direction: row-reverse; gap: ${layout.gap}px;
+      pointer-events: none;
+    `;
+    root.appendChild(actionRow);
 
-    const jumpBtn = this.makeActionButton('⬆️', 'とぶ', layout, 1, 1);
-    root.appendChild(jumpBtn);
-
-    const buildBtn = this.makeActionButton('🔨', 'つくる', layout, 0, 2);
-    root.appendChild(buildBtn);
-
-    const reloadBtn = this.makeActionButton('🔄', 'きりかえ', layout, 1, 3);
-    root.appendChild(reloadBtn);
+    const jumpBtn = this.makeActionButton('jump', layout);
+    const buildBtn = this.makeActionButton('build', layout);
+    const swapBtn = this.makeActionButton('swap', layout);
+    const rotateBtn = this.makeActionButton('rotate', layout);
+    actionRow.append(jumpBtn, buildBtn, swapBtn, rotateBtn);
 
     this.container.appendChild(root);
     this.root = root;
@@ -158,20 +180,20 @@ export class TouchInput implements InputSource {
 
     const onLookDown = (e: PointerEvent) => {
       if (this.lookPointerId !== null) return;
-      if ((e.target as HTMLElement).closest('.skb-action-btn')) return;
+      if ((e.target as HTMLElement).closest('.skb-action-btn, .skb-pause-btn')) return;
       this.lookPointerId = e.pointerId;
       this.lookLastX = e.clientX;
       this.lookLastY = e.clientY;
       this.lookStartX = e.clientX;
       this.lookStartY = e.clientY;
       this.lookMoved = false;
-      rightArea.setPointerCapture(e.pointerId);
+      lookArea.setPointerCapture(e.pointerId);
       e.preventDefault();
     };
     const onLookMove = (e: PointerEvent) => {
       if (this.lookPointerId !== e.pointerId) return;
-      this.state.pointerDeltaX += (e.clientX - this.lookLastX) * 1.5;
-      this.state.pointerDeltaY += (e.clientY - this.lookLastY) * 1.5;
+      this.state.pointerDeltaX += (e.clientX - this.lookLastX) * this.lookSensitivity;
+      this.state.pointerDeltaY += (e.clientY - this.lookLastY) * this.lookSensitivity;
       if (Math.hypot(e.clientX - this.lookStartX, e.clientY - this.lookStartY) > 12) this.lookMoved = true;
       this.lookLastX = e.clientX;
       this.lookLastY = e.clientY;
@@ -186,25 +208,23 @@ export class TouchInput implements InputSource {
       if (this.lookPointerId !== e.pointerId) return;
       this.lookPointerId = null;
     };
-    rightArea.addEventListener('pointerdown', onLookDown);
-    rightArea.addEventListener('pointermove', onLookMove);
-    rightArea.addEventListener('pointerup', onLookUp);
-    rightArea.addEventListener('pointercancel', onLookCancel);
+    lookArea.addEventListener('pointerdown', onLookDown);
+    lookArea.addEventListener('pointermove', onLookMove);
+    lookArea.addEventListener('pointerup', onLookUp);
+    lookArea.addEventListener('pointercancel', onLookCancel);
 
-    this.bindFireButton(fireBtn, 'right');
-    this.bindFireButton(leftFireBtn, 'left');
-
-    jumpBtn.addEventListener('pointerdown', (e) => {
+    this.bindFireButton(fireBtn);
+    this.bindTapButton(jumpBtn, () => {
       this.state.jump = true;
-      e.stopPropagation();
     });
-    buildBtn.addEventListener('pointerdown', (e) => {
+    this.bindTapButton(buildBtn, () => {
       this.state.toggleBuild = true;
-      e.stopPropagation();
     });
-    reloadBtn.addEventListener('pointerdown', (e) => {
+    this.bindTapButton(swapBtn, () => {
       this.state.reload = true;
-      e.stopPropagation();
+    });
+    this.bindTapButton(rotateBtn, () => {
+      this.state.rotateBuild = true;
     });
 
     this.listeners.push(() => {
@@ -212,10 +232,10 @@ export class TouchInput implements InputSource {
       leftBase.removeEventListener('pointermove', onLeftMove);
       leftBase.removeEventListener('pointerup', onLeftUp);
       leftBase.removeEventListener('pointercancel', onLeftUp);
-      rightArea.removeEventListener('pointerdown', onLookDown);
-      rightArea.removeEventListener('pointermove', onLookMove);
-      rightArea.removeEventListener('pointerup', onLookUp);
-      rightArea.removeEventListener('pointercancel', onLookCancel);
+      lookArea.removeEventListener('pointerdown', onLookDown);
+      lookArea.removeEventListener('pointermove', onLookMove);
+      lookArea.removeEventListener('pointerup', onLookUp);
+      lookArea.removeEventListener('pointercancel', onLookCancel);
     });
   }
 
@@ -232,14 +252,16 @@ export class TouchInput implements InputSource {
 
   private makeJoystickBase(layout: TouchLayout): HTMLDivElement {
     const el = document.createElement('div');
+    el.className = 'skb-joystick';
     el.style.cssText = `
       position: absolute;
       left: calc(${layout.joystickInset}px + env(safe-area-inset-left, 0px));
       bottom: calc(${layout.joystickInset}px + env(safe-area-inset-bottom, 0px));
       width: ${layout.joystickSize}px; height: ${layout.joystickSize}px;
       border-radius: 50%;
-      background: rgba(255,255,255,0.25);
-      border: 3px solid rgba(255,255,255,0.5);
+      background: rgba(255,255,255,0.22);
+      border: 3px solid rgba(255,255,255,0.55);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.18);
       pointer-events: auto;
       touch-action: none;
       display: flex; align-items: center; justify-content: center;
@@ -252,35 +274,58 @@ export class TouchInput implements InputSource {
     el.style.cssText = `
       width: ${layout.joystickKnob}px; height: ${layout.joystickKnob}px;
       border-radius: 50%;
-      background: rgba(255,255,255,0.85);
+      background: rgba(255,255,255,0.9);
       box-shadow: 0 2px 8px rgba(0,0,0,0.3);
       pointer-events: none;
     `;
     return el;
   }
 
-  private makeActionButton(label: string, ariaLabel: string, layout: TouchLayout, column: 0 | 1, row: number): HTMLDivElement {
+  private makeFireButton(layout: TouchLayout): HTMLDivElement {
     const el = document.createElement('div');
-    el.className = 'skb-action-btn';
+    el.className = 'skb-action-btn skb-fire-btn';
     el.setAttribute('role', 'button');
-    el.setAttribute('aria-label', ariaLabel);
-    el.textContent = label;
-    const right = layout.actionRight + column * (layout.actionSize + layout.actionGap);
-    const bottom = layout.actionBottom + row * (layout.actionSize + layout.actionGap);
+    el.setAttribute('aria-label', 'うつ');
+    el.textContent = '💦';
     el.style.cssText = `
       position: absolute;
-      right: calc(${right}px + env(safe-area-inset-right, 0px));
-      bottom: calc(${bottom}px + env(safe-area-inset-bottom, 0px));
+      right: calc(${layout.edgeInset}px + env(safe-area-inset-right, 0px));
+      bottom: calc(${layout.edgeInset}px + env(safe-area-inset-bottom, 0px));
+      width: ${layout.fireSize}px; height: ${layout.fireSize}px;
+      border-radius: 50%;
+      background: rgba(120,213,255,0.92);
+      border: 3px solid rgba(255,255,255,0.9);
+      box-shadow: 0 3px 12px rgba(0,0,0,0.28);
+      pointer-events: auto;
+      touch-action: none;
+      display: flex; align-items: center; justify-content: center;
+      font-size: ${Math.round(layout.fireSize * 0.45)}px;
+      user-select: none;
+      -webkit-user-select: none;
+    `;
+    return el;
+  }
+
+  private makeActionButton(id: ActionId, layout: TouchLayout): HTMLDivElement {
+    const el = document.createElement('div');
+    const meta = ACTION_LABELS[id];
+    el.className = `skb-action-btn skb-action-${id}`;
+    el.setAttribute('role', 'button');
+    el.setAttribute('aria-label', meta.aria);
+    el.textContent = meta.icon;
+    el.style.cssText = `
       width: ${layout.actionSize}px; height: ${layout.actionSize}px;
       border-radius: 50%;
-      background: rgba(255,255,255,0.85);
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      background: rgba(255,255,255,0.88);
+      border: 2px solid rgba(255,255,255,0.95);
+      box-shadow: 0 3px 10px rgba(0,0,0,0.26);
       pointer-events: auto;
       touch-action: none;
       display: flex; align-items: center; justify-content: center;
       font-size: ${layout.actionFont}px;
       user-select: none;
       -webkit-user-select: none;
+      flex: 0 0 auto;
     `;
     return el;
   }
@@ -296,6 +341,7 @@ export class TouchInput implements InputSource {
     out.rotateBuild = out.rotateBuild || this.state.rotateBuild;
     out.pointerDeltaX += this.state.pointerDeltaX;
     out.pointerDeltaY += this.state.pointerDeltaY;
+    out.pause = out.pause || this.state.pause;
     this.state.jump = false;
     this.state.reload = false;
     this.state.toggleBuild = false;
@@ -303,15 +349,38 @@ export class TouchInput implements InputSource {
     this.state.rotateBuild = false;
     this.state.pointerDeltaX = 0;
     this.state.pointerDeltaY = 0;
+    this.state.pause = false;
     this.fireQueued = false;
   }
 
-  private bindFireButton(button: HTMLElement, kind: FireButtonKind): void {
+  private bindTapButton(button: HTMLElement, onTap: () => void): void {
+    const onDown = (e: PointerEvent) => {
+      onTap();
+      button.style.transform = 'scale(0.9)';
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const onUp = (e: PointerEvent) => {
+      button.style.transform = '';
+      e.stopPropagation();
+    };
+    button.addEventListener('pointerdown', onDown);
+    button.addEventListener('pointerup', onUp);
+    button.addEventListener('pointercancel', onUp);
+    this.listeners.push(() => {
+      button.removeEventListener('pointerdown', onDown);
+      button.removeEventListener('pointerup', onUp);
+      button.removeEventListener('pointercancel', onUp);
+    });
+  }
+
+  /** うつボタンは押しっぱなしで連射でき、そのまま指を動かすと視点も動く。 */
+  private bindFireButton(button: HTMLElement): void {
     const onFireDown = (e: PointerEvent) => {
       this.firePointerIds.add(e.pointerId);
       this.state.fire = true;
       this.fireQueued = true;
-      if (kind === 'right' && this.lookPointerId === null) {
+      if (this.lookPointerId === null) {
         this.lookPointerId = e.pointerId;
         this.lookLastX = e.clientX;
         this.lookLastY = e.clientY;
@@ -320,15 +389,15 @@ export class TouchInput implements InputSource {
         this.lookMoved = false;
       }
       button.setPointerCapture(e.pointerId);
-      button.style.background = 'rgba(201,239,255,0.96)';
-      button.style.boxShadow = '0 0 18px rgba(111,213,255,0.75), 0 2px 8px rgba(0,0,0,0.3)';
+      button.style.background = 'rgba(201,239,255,0.98)';
+      button.style.boxShadow = '0 0 20px rgba(111,213,255,0.85), 0 3px 12px rgba(0,0,0,0.28)';
       e.preventDefault();
       e.stopPropagation();
     };
     const onFireMove = (e: PointerEvent) => {
-      if (kind !== 'right' || this.lookPointerId !== e.pointerId) return;
-      this.state.pointerDeltaX += (e.clientX - this.lookLastX) * 1.5;
-      this.state.pointerDeltaY += (e.clientY - this.lookLastY) * 1.5;
+      if (this.lookPointerId !== e.pointerId) return;
+      this.state.pointerDeltaX += (e.clientX - this.lookLastX) * this.lookSensitivity;
+      this.state.pointerDeltaY += (e.clientY - this.lookLastY) * this.lookSensitivity;
       if (Math.hypot(e.clientX - this.lookStartX, e.clientY - this.lookStartY) > 12) this.lookMoved = true;
       this.lookLastX = e.clientX;
       this.lookLastY = e.clientY;
@@ -339,8 +408,8 @@ export class TouchInput implements InputSource {
       this.firePointerIds.delete(e.pointerId);
       this.state.fire = this.firePointerIds.size > 0;
       if (this.lookPointerId === e.pointerId) this.lookPointerId = null;
-      button.style.background = kind === 'right' ? 'rgba(255,255,255,0.85)' : 'rgba(201,239,255,0.88)';
-      button.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+      button.style.background = 'rgba(120,213,255,0.92)';
+      button.style.boxShadow = '0 3px 12px rgba(0,0,0,0.28)';
       e.preventDefault();
       e.stopPropagation();
     };
@@ -355,62 +424,42 @@ export class TouchInput implements InputSource {
       button.removeEventListener('pointercancel', onFireUp);
     });
   }
-
-  private makeLeftFireButton(layout: TouchLayout): HTMLDivElement {
-    const el = document.createElement('div');
-    el.className = 'skb-action-btn skb-left-fire-btn';
-    el.setAttribute('role', 'button');
-    el.setAttribute('aria-label', 'ひだりうつ');
-    el.textContent = '💦';
-    const size = Math.round(layout.actionSize * 0.88);
-    const left = layout.joystickInset + layout.joystickSize + Math.round(layout.actionGap * 0.6);
-    const bottom = layout.joystickInset + Math.round(layout.joystickSize * 0.44);
-    el.style.cssText = `
-      position: absolute;
-      left: calc(${left}px + env(safe-area-inset-left, 0px));
-      bottom: calc(${bottom}px + env(safe-area-inset-bottom, 0px));
-      width: ${size}px; height: ${size}px;
-      border-radius: 50%;
-      background: rgba(201,239,255,0.88);
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-      pointer-events: auto;
-      touch-action: none;
-      display: flex; align-items: center; justify-content: center;
-      font-size: ${Math.round(layout.actionFont * 0.88)}px;
-      user-select: none;
-      -webkit-user-select: none;
-    `;
-    return el;
-  }
 }
 
-function getTouchLayout(): TouchLayout {
-  const shortSide = Math.min(window.innerWidth, window.innerHeight);
-  const longSide = Math.max(window.innerWidth, window.innerHeight);
-  const compact = shortSide <= 430 && longSide <= 940;
+export function getTouchLayout(
+  width = window.innerWidth,
+  height = window.innerHeight,
+): TouchLayout {
+  const shortSide = Math.min(width, height);
+  const longSide = Math.max(width, height);
+  const compact = shortSide <= 480 && longSide <= 960;
   return compact
     ? {
         compact,
-        joystickSize: 104,
-        joystickKnob: 46,
+        joystickSize: 116,
+        joystickKnob: 50,
         joystickInset: 16,
-        joystickTravel: 40,
-        actionSize: 58,
-        actionFont: 26,
-        actionRight: 16,
-        actionBottom: 16,
-        actionGap: 14,
+        joystickTravel: 44,
+        fireSize: 78,
+        actionSize: 54,
+        actionFont: 24,
+        edgeInset: 14,
+        gap: 12,
+        lookSensitivity: 1.15,
       }
     : {
         compact,
-        joystickSize: 130,
-        joystickKnob: 56,
-        joystickInset: 24,
-        joystickTravel: 50,
-        actionSize: 72,
+        joystickSize: 148,
+        joystickKnob: 62,
+        joystickInset: 26,
+        joystickTravel: 56,
+        fireSize: 104,
+        actionSize: 74,
         actionFont: 32,
-        actionRight: 24,
-        actionBottom: 24,
-        actionGap: 18,
+        edgeInset: 22,
+        gap: 16,
+        lookSensitivity: 0.95,
       };
 }
+
+export type { TouchLayout };

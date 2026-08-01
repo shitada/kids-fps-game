@@ -3,6 +3,9 @@ import type { SkinConfig, WeaponId } from '@/types';
 import { WEAPONS, WEAPON_ORDER } from '@/game/config/weapons';
 import { AgentVisual, buildAgentMesh } from '@/game/entities/AgentVisual';
 
+/** みずぎれから復帰できるみずの割合 */
+const WATER_READY_RATIO = 0.3;
+
 export interface AgentLoadout {
   hp: number;
   hpMax: number;
@@ -32,6 +35,10 @@ export class Agent {
   radius = 0.5;
   height = 1.7;
   speed = 7;
+  /** 小数点以下を持ち越すためのバッファ（自動回復用） */
+  private refillCarry = 0;
+  /** みずぎれ中は、ある程度たまるまで撃てない（ポタポタ撃ちを防ぐ） */
+  private waterRecharging = false;
 
   constructor(id: string, isCpu: boolean, skin: SkinConfig) {
     this.id = id;
@@ -116,6 +123,53 @@ export class Agent {
   refillWater(amount: number): void {
     const cap = this.ammoMax('water-gun');
     this.loadout.ammo['water-gun'] = Math.min(cap, this.loadout.ammo['water-gun'] + amount);
+    if (this.loadout.ammo['water-gun'] >= cap * WATER_READY_RATIO) this.waterRecharging = false;
+  }
+
+  /** みずをためている最中かどうか。HUD とはっしゃ判定で使う。 */
+  get isRechargingWater(): boolean {
+    return this.waterRecharging;
+  }
+
+  /** その武器がいま撃てるか（クールダウンは別で見る）。 */
+  canFireWeapon(w: WeaponId): boolean {
+    if (this.loadout.ammo[w] < WEAPONS[w].ammoPerShot) return false;
+    if (w === 'water-gun' && this.waterRecharging) return false;
+    return true;
+  }
+
+  /** 撃ったぶんのみずを減らす。からになったら「ためなおし」に入る。 */
+  consumeAmmo(w: WeaponId): void {
+    this.loadout.ammo[w] = Math.max(0, this.loadout.ammo[w] - WEAPONS[w].ammoPerShot);
+    if (w === 'water-gun' && this.loadout.ammo[w] <= 0) {
+      this.waterRecharging = true;
+      this.refillCarry = 0;
+    }
+  }
+
+  /**
+   * せなかのタンクからみずでっぽうがゆっくり回復する。
+   * みずぎれで何もできない時間が続くと、子供はすぐ飽きてしまうため。
+   */
+  regenAmmo(dt: number, nowMs: number): void {
+    const conf = WEAPONS['water-gun'];
+    if (conf.refillPerSecond <= 0) return;
+    if (nowMs < this.lastFireMs + conf.refillDelayMs) {
+      this.refillCarry = 0;
+      return;
+    }
+    const cap = this.ammoMax('water-gun');
+    if (this.loadout.ammo['water-gun'] >= cap) {
+      this.refillCarry = 0;
+      this.waterRecharging = false;
+      return;
+    }
+    this.refillCarry += conf.refillPerSecond * dt;
+    const whole = Math.floor(this.refillCarry);
+    if (whole <= 0) return;
+    this.refillCarry -= whole;
+    this.loadout.ammo['water-gun'] = Math.min(cap, this.loadout.ammo['water-gun'] + whole);
+    if (this.loadout.ammo['water-gun'] >= cap * WATER_READY_RATIO) this.waterRecharging = false;
   }
 
   ammoMax(w: WeaponId): number {
@@ -137,6 +191,10 @@ export class Agent {
   playHitVisual(nowSec: number): void {
     this.visual.playHit(nowSec);
   }
+}
+
+export function agentColliderId(agentId: string): string {
+  return `agent-${agentId}`;
 }
 
 export { buildAgentMesh };

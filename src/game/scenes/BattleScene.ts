@@ -1,25 +1,30 @@
 import * as THREE from 'three';
 import type { GameScene, SceneContext } from './Scene';
-import type { MapConfig, MatchResult, WeaponId, BuildPieceKind } from '@/types';
+import type { InputState, MapConfig, MatchResult, WeaponId, BuildPieceKind } from '@/types';
 import { getMapById } from '@/game/config/maps';
 import { buildWorld } from '@/game/systems/WorldBuilder';
 import { CollisionWorld, makeAABB, distanceXZ } from '@/game/systems/CollisionWorld';
-import { Agent } from '@/game/entities/Agent';
+import { Agent, agentColliderId } from '@/game/entities/Agent';
 import { createFirstPersonWaterGun } from '@/game/entities/AgentVisual';
 import { SKINS, SKIN_ORDER } from '@/game/config/skins';
 import { WEAPONS } from '@/game/config/weapons';
-import { BUILD_ORDER, BUILD_PIECES } from '@/game/config/build';
+import { BUILD_ORDER, BUILD_PIECES, BUILD_PIECE_SIZE } from '@/game/config/build';
 import { PICKUPS } from '@/game/config/pickups';
-import { BuildManager } from '@/game/entities/BuildPiece';
+import { BuildManager, placePieceAabb } from '@/game/entities/BuildPiece';
 import { createPickup, setPickupAvailable, refreshPickupRotation, type Pickup } from '@/game/entities/Pickup';
 import { spawnProjectile, disposeProjectile, syncProjectileVisual, type Projectile } from '@/game/entities/Projectile';
 import { WaterSplashPool } from '@/game/effects/WaterSplash';
 import { AiSystem } from '@/game/systems/AiSystem';
 import { DIFFICULTY } from '@/game/config/difficulty';
 import { SafeZone } from '@/game/systems/SafeZone';
+import { disposeObject3D } from '@/game/systems/disposeObject';
+import { applyAimAssist, aimAssistParamsFor, type AimAssistTarget } from '@/game/systems/AimAssist';
 import { InputManager } from '@/game/input/InputManager';
+import { isTouchDevice } from '@/game/input/touchDevice';
 import { battleTrackForMap } from '@/game/audio/AudioEngine';
-import { Hud } from '@/ui/Hud';
+import { Hud, screenBearingRad, type RadarBlip } from '@/ui/Hud';
+import { AgentNameplates, type NameplateTarget } from '@/ui/AgentNameplates';
+import { PauseOverlay } from '@/ui/PauseOverlay';
 
 const PLAYER_ID = 'player';
 const NUM_BOTS = 6;
@@ -27,7 +32,15 @@ const GRAVITY = 22;
 const JUMP_VELOCITY = 9;
 const MOVE_SPEED = 7.5;
 const MOUSE_SENS = 0.0028;
-const TOUCH_SENS = 0.005;
+const TOUCH_SENS = 0.0038;
+/** 視点のガタつきを抑えるための追従率（1 に近いほどキビキビ動く） */
+const LOOK_SMOOTHING = 0.35;
+const ZONE_GRACE_SEC = 25;
+const BUILD_DISTANCE = 5;
+/** スポーン時に「開けている」とみなす距離（メートル） */
+const SPAWN_CLEAR_METERS = 14;
+/** 一人称のみずでっぽうの基準位置（カメラからの相対） */
+const FP_GUN_BASE = { x: 0.32, y: -0.3, z: -0.9 };
 
 export class BattleScene implements GameScene {
   private mapId: string;
@@ -39,6 +52,8 @@ export class BattleScene implements GameScene {
   private collision!: CollisionWorld;
   private input = new InputManager();
   private hud!: Hud;
+  private nameplates!: AgentNameplates;
+  private pauseOverlay!: PauseOverlay;
   private agents: Agent[] = [];
   private player!: Agent;
   private projectiles: Projectile[] = [];
@@ -47,10 +62,12 @@ export class BattleScene implements GameScene {
   private splash!: WaterSplashPool;
   private ai!: AiSystem;
   private safeZone!: SafeZone;
+  private worldUpdate: (dt: number) => void = () => {};
   private buildMode = false;
   private buildKindIndex = 0;
   private buildYawIndex = 0;
   private buildPreview!: THREE.Mesh;
+  private buildPreviewMaterial!: THREE.MeshBasicMaterial;
   private firstPersonGun!: THREE.Group;
   private firstPersonGunNozzle: THREE.Object3D | null = null;
   private firstPersonGunUntil = 0;
@@ -62,8 +79,22 @@ export class BattleScene implements GameScene {
   private lastFrame = 0;
   private resizeHandler!: () => void;
   private done = false;
+  private paused = false;
   private startedAt = 0;
   private collisionByAgent = new Map<string, string>();
+  private touch = false;
+  private lookVelX = 0;
+  private lookVelY = 0;
+  private viewport = { width: 1, height: 1 };
+  private radarBlips: RadarBlip[] = [];
+  private nameplateTargets: NameplateTarget[] = [];
+  private aimTargets: AimAssistTarget[] = [];
+  private tmpVec = new THREE.Vector3();
+  private tmpVec2 = new THREE.Vector3();
+  private tmpCenter = new THREE.Vector3();
+  private colliderSize = new THREE.Vector3(0.9, 1.7, 0.9);
+  private nextOutOfWaterMessageAt = 0;
+  private nextHitSfxAt = 0;
 
   constructor(mapId: string) {
     this.mapId = mapId;
@@ -72,49 +103,75 @@ export class BattleScene implements GameScene {
   async enter(ctx: SceneContext): Promise<void> {
     this.ctx = ctx;
     this.map = getMapById(this.mapId);
+    this.touch = isTouchDevice();
 
     this.renderer = new THREE.WebGLRenderer({ canvas: ctx.canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.resizeRenderer();
 
-    const viewport = gameViewportSize();
-    this.camera = new THREE.PerspectiveCamera(72, viewport.width / viewport.height, 0.1, 500);
+    this.camera = new THREE.PerspectiveCamera(74, this.viewport.width / this.viewport.height, 0.1, 600);
     const built = buildWorld(this.map);
     this.scene = built.scene;
     this.collision = built.collision;
+    this.worldUpdate = built.update;
 
     this.build = new BuildManager(this.scene, this.collision);
     this.splash = new WaterSplashPool(this.scene);
     const diffParams = DIFFICULTY[ctx.save.difficulty];
     this.ai = new AiSystem(diffParams);
 
-    this.safeZone = new SafeZone(this.map.sizeMeters / 2 - 2, 8, 180);
+    this.safeZone = new SafeZone(this.map.sizeMeters / 2 - 2, {
+      minRadius: 10,
+      shrinkSeconds: 170,
+      graceSeconds: ZONE_GRACE_SEC,
+    });
     this.safeZone.attach(this.scene);
 
     this.spawnAgents(diffParams.moveSpeed);
     this.spawnPickups();
     this.scene.add(this.camera);
     this.firstPersonGun = createFirstPersonWaterGun(this.player.skin);
-    this.firstPersonGun.position.set(0.36, -0.28, -0.78);
-    this.firstPersonGun.rotation.set(-0.12, -0.24, 0.05);
+    this.firstPersonGun.position.set(FP_GUN_BASE.x, FP_GUN_BASE.y, FP_GUN_BASE.z);
+    this.firstPersonGun.rotation.set(-0.04, 0.26, 0.02);
+    this.firstPersonGun.scale.setScalar(0.62);
     this.firstPersonGunNozzle = this.firstPersonGun.getObjectByName('first-person-water-gun-nozzle') ?? null;
     this.camera.add(this.firstPersonGun);
 
     const previewGeo = new THREE.BoxGeometry(1, 1, 1);
-    const previewMat = new THREE.MeshBasicMaterial({ color: 0x80d4ff, transparent: true, opacity: 0.45, wireframe: false });
-    this.buildPreview = new THREE.Mesh(previewGeo, previewMat);
+    this.buildPreviewMaterial = new THREE.MeshBasicMaterial({ color: 0x80d4ff, transparent: true, opacity: 0.45 });
+    this.buildPreview = new THREE.Mesh(previewGeo, this.buildPreviewMaterial);
     this.buildPreview.visible = false;
     this.scene.add(this.buildPreview);
 
     this.hud = new Hud(ctx.rootEl);
+    this.hud.onPause(() => this.togglePause());
+    this.nameplates = new AgentNameplates(ctx.rootEl);
+    this.pauseOverlay = new PauseOverlay(ctx.uiOverlay, {
+      onResume: () => this.setPaused(false),
+      onRestart: () => {
+        this.ctx.audio.playSfx('click');
+        this.ctx.goto({ id: 'battle', mapId: this.mapId });
+      },
+      onQuit: () => {
+        this.ctx.audio.playSfx('click');
+        this.ctx.goto({ id: 'title' });
+      },
+    });
+
     this.hud.setHp(this.player.loadout.hp, this.player.loadout.hpMax);
-    this.hud.setWeapon(this.player.loadout.weapon, this.player.loadout.ammo[this.player.loadout.weapon], this.player.ammoMax(this.player.loadout.weapon));
+    this.hud.setWeapon(
+      this.player.loadout.weapon,
+      this.player.loadout.ammo[this.player.loadout.weapon],
+      this.player.ammoMax(this.player.loadout.weapon),
+      this.player.isRechargingWater,
+    );
     this.hud.setMaterials(this.player.loadout.wood, this.player.loadout.stone);
     this.hud.setRemaining(this.aliveCount(), this.agents.length);
     this.hud.setBuildMode(false);
 
     this.input.attachKeyboardMouse(ctx.canvas);
     this.input.attachTouch(ctx.rootEl);
+    document.body.classList.toggle('skb-touch-mode', this.touch);
 
     this.resizeHandler = () => {
       this.resizeRenderer();
@@ -123,8 +180,10 @@ export class BattleScene implements GameScene {
     window.visualViewport?.addEventListener('resize', this.resizeHandler);
 
     if (!ctx.save.tutorialSeen) {
-      const tutorial = navigator.maxTouchPoints > 0 ? 'みぎがわでみる！\n💦でうつ！' : '💦 クリックでみる！うつ！';
-      this.hud.showMessage(tutorial, 3500);
+      const tutorial = this.touch
+        ? '👈 うごく　👉 みる\n💦ボタンで みずをかける！'
+        : '👀 クリックで みまわす\n💦 おしっぱなしで みずをかける！';
+      this.hud.showMessage(tutorial, 4200);
       ctx.saveUpdate({ tutorialSeen: true });
     } else {
       this.hud.showMessage(`📍 ${this.map.nameHiragana}`, 1500);
@@ -143,6 +202,7 @@ export class BattleScene implements GameScene {
     this.player.applyBaseSpeed(MOVE_SPEED);
     const sp = spawnPoints.shift() ?? [0, 0];
     this.player.position.set(sp[0], 0.85, sp[1]);
+    this.player.yaw = this.clearSpawnYaw(this.player.position);
     this.agents.push(this.player);
     this.scene.add(this.player.mesh);
 
@@ -153,21 +213,44 @@ export class BattleScene implements GameScene {
       bot.applyBaseSpeed(cpuSpeed);
       const point = spawnPoints[i % spawnPoints.length] ?? [(Math.random() - 0.5) * 50, (Math.random() - 0.5) * 50];
       bot.position.set(point[0], 0.85, point[1]);
+      bot.yaw = this.clearSpawnYaw(bot.position);
       this.agents.push(bot);
       this.scene.add(bot.mesh);
     }
     this.agents.forEach((a) => this.addAgentCollider(a));
   }
 
+  /**
+   * スタート直後に壁を向いていると「なにも見えない」ので、
+   * ひろばの中心方向から順に見て、いちばん開けている向きを選ぶ。
+   */
+  private clearSpawnYaw(position: THREE.Vector3): number {
+    const eye = position.clone();
+    eye.y += 1.4;
+    const toCenter = Math.atan2(-(0 - position.x), -(0 - position.z));
+    const steps = 12;
+    let bestYaw = toCenter;
+    let bestClearance = -1;
+    for (let i = 0; i < steps; i++) {
+      const yaw = toCenter + (i * Math.PI * 2) / steps;
+      const dir = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+      const hit = this.collision.raycast(eye, dir, SPAWN_CLEAR_METERS);
+      const clearance = hit ? hit.distance : SPAWN_CLEAR_METERS;
+      if (clearance >= SPAWN_CLEAR_METERS) return yaw;
+      if (clearance > bestClearance) {
+        bestClearance = clearance;
+        bestYaw = yaw;
+      }
+    }
+    return bestYaw;
+  }
+
   private addAgentCollider(a: Agent): void {
-    const id = `agent-${a.id}`;
+    const id = agentColliderId(a.id);
     this.collisionByAgent.set(a.id, id);
     this.collision.add({
       id,
-      aabb: makeAABB(
-        new THREE.Vector3(a.position.x, a.position.y, a.position.z),
-        new THREE.Vector3(0.9, 1.7, 0.9),
-      ),
+      aabb: makeAABB(new THREE.Vector3(a.position.x, a.position.y + 0.85, a.position.z), this.colliderSize),
       blocksMovement: false,
       blocksProjectile: true,
     });
@@ -176,12 +259,8 @@ export class BattleScene implements GameScene {
   private updateAgentCollider(a: Agent): void {
     const id = this.collisionByAgent.get(a.id);
     if (!id) return;
-    const col = (this.collision as unknown as { byId: Map<string, { aabb: ReturnType<typeof makeAABB> }> }).byId.get(id);
-    if (col) {
-      const half = new THREE.Vector3(0.45, 0.85, 0.45);
-      col.aabb.min.set(a.position.x - half.x, a.position.y - half.y, a.position.z - half.z);
-      col.aabb.max.set(a.position.x + half.x, a.position.y + half.y + 0.85, a.position.z + half.z);
-    }
+    this.tmpCenter.set(a.position.x, a.position.y + 0.85, a.position.z);
+    this.collision.updateAabb(id, this.tmpCenter, this.colliderSize);
   }
 
   private spawnPickups(): void {
@@ -206,20 +285,38 @@ export class BattleScene implements GameScene {
     const now = performance.now();
     const dt = Math.min(0.05, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
-    this.elapsed += dt;
-    this.tick(dt, now);
+    // ポーズ中も入力は毎フレーム読む。読まないと Esc が押しっぱなし扱いで
+    // 残ってしまい、「つづける」を押した直後にまたポーズしてしまう。
+    const input = this.input.poll();
+    if (input.pause) this.togglePause();
+    if (!this.paused) {
+      this.elapsed += dt;
+      this.tick(input, dt, now);
+    }
     this.renderer.render(this.scene, this.camera);
     this.rafId = requestAnimationFrame(this.loop);
   };
 
-  private tick(dt: number, now: number): void {
-    const input = this.input.poll();
+  private togglePause(): void {
+    this.setPaused(!this.paused);
+  }
 
+  private setPaused(paused: boolean): void {
+    if (this.done) return;
+    this.paused = paused;
+    if (paused) {
+      this.pauseOverlay.show();
+      this.ctx.audio.playSfx('click');
+      if (document.pointerLockElement) document.exitPointerLock();
+    } else {
+      this.pauseOverlay.hide();
+      this.lastFrame = performance.now();
+    }
+  }
+
+  private tick(input: InputState, dt: number, now: number): void {
     if (!this.player.eliminated) {
-      const sensX = document.pointerLockElement ? MOUSE_SENS : TOUCH_SENS;
-      this.player.yaw -= input.pointerDeltaX * sensX;
-      this.player.pitch -= input.pointerDeltaY * sensX;
-      this.player.pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.player.pitch));
+      this.updatePlayerLook(input.pointerDeltaX, input.pointerDeltaY, dt);
 
       if (input.toggleBuild) {
         this.buildMode = !this.buildMode;
@@ -231,7 +328,10 @@ export class BattleScene implements GameScene {
         this.buildKindIndex = input.buildIndex;
         this.hud.setBuildMode(this.buildMode, BUILD_ORDER[this.buildKindIndex]);
       }
-      if (input.rotateBuild) this.buildYawIndex = (this.buildYawIndex + 1) % 4;
+      if (input.rotateBuild) {
+        this.buildYawIndex = (this.buildYawIndex + 1) % 4;
+        if (this.buildMode) this.ctx.audio.playSfx('click');
+      }
 
       const forward = this.player.forward();
       const right = this.player.rightVec();
@@ -251,14 +351,18 @@ export class BattleScene implements GameScene {
 
       if (input.fire) {
         if (this.buildMode) this.tryBuild(this.player);
-        else this.tryFire(this.player, this.player.lookDirection(), now);
+        else this.tryFire(this.player, this.playerAimDirection(), now);
       }
 
-      if (input.reload) this.player.cycleWeapon();
+      if (input.reload) {
+        this.player.cycleWeapon();
+        this.ctx.audio.playSfx('click');
+      }
     }
 
     for (const a of this.agents) {
       if (a.eliminated) continue;
+      a.regenAmmo(dt, now);
       a.velocity.y -= GRAVITY * dt;
       if (a.isCpu) {
         const cpuCtx = this.ai.tick(a, dt, now, this.agents, this.pickups, this.collision, this.map.sizeMeters / 2);
@@ -283,7 +387,10 @@ export class BattleScene implements GameScene {
       a.onGround = res.onGround;
       if (res.onGround) a.velocity.y = Math.max(0, a.velocity.y);
       if (this.safeZone.isOutside(a.position)) {
-        const damage = this.safeZone.damagePerSecond * dt;
+        // 外に出るほど強く乾く。ふちギリギリならやさしくしておく。
+        const outside = this.safeZone.distanceOutside(a.position);
+        const intensity = 0.5 + Math.min(1, outside / 12);
+        const damage = this.safeZone.damagePerSecond * intensity * dt;
         if (a.takeDamage(damage)) this.onEliminated(a, null);
       }
       a.syncMesh(this.elapsed);
@@ -294,11 +401,11 @@ export class BattleScene implements GameScene {
       if (a.eliminated) continue;
       for (const p of this.pickups) {
         if (!p.available) continue;
-        if (distanceXZ(a.position, p.position) > 1.6) continue;
+        if (distanceXZ(a.position, p.position) > 1.8) continue;
         this.applyPickup(a, p);
         setPickupAvailable(p, false, now);
-        this.ctx.audio.playSfx('pickup');
         if (a.id === PLAYER_ID) {
+          this.ctx.audio.playSfx('pickup');
           this.hud.showMessage(`${PICKUPS[p.kind].emoji} ${PICKUPS[p.kind].nameHiragana} ゲット！`, 1000);
         }
       }
@@ -319,7 +426,7 @@ export class BattleScene implements GameScene {
       const segLen = segDir.length();
       if (segLen > 0) {
         segDir.normalize();
-        const hit = this.collision.raycast(prev, segDir, segLen, `agent-${pr.attackerId}`);
+        const hit = this.collision.raycast(prev, segDir, segLen, agentColliderId(pr.attackerId));
         if (hit) {
           this.onProjectileHit(pr, hit.point, hit.collider.id);
           disposeProjectile(this.scene, pr);
@@ -327,8 +434,15 @@ export class BattleScene implements GameScene {
           continue;
         }
       }
-      if (pr.life > pr.maxLife || pr.position.y < -2) {
-        this.splash.burst(pr.position, 4, 3);
+      if (pr.position.y <= 0.08) {
+        this.splash.burst(pr.position, 7, 3.4);
+        this.playNearbySfx('splash', pr.position, 26);
+        disposeProjectile(this.scene, pr);
+        this.projectiles.splice(i, 1);
+        continue;
+      }
+      if (pr.life > pr.maxLife) {
+        this.splash.burst(pr.position, 5, 3);
         disposeProjectile(this.scene, pr);
         this.projectiles.splice(i, 1);
       }
@@ -336,6 +450,7 @@ export class BattleScene implements GameScene {
 
     this.splash.update(dt);
     this.safeZone.update(dt);
+    this.worldUpdate(dt);
 
     if (!this.player.eliminated) {
       const eye = this.player.eyePosition;
@@ -345,38 +460,30 @@ export class BattleScene implements GameScene {
       this.camera.lookAt(eye.clone().add(dir));
       this.player.mesh.visible = false;
       this.updateFirstPersonGun(now);
-      if (this.buildMode) {
-        const previewPos = eye.clone().add(this.player.lookDirection().setY(0).normalize().multiplyScalar(4));
-        previewPos.y = 0;
-        const snapped = new THREE.Vector3(Math.round(previewPos.x / 4) * 4, 0, Math.round(previewPos.z / 4) * 4);
-        const kind = BUILD_ORDER[this.buildKindIndex];
-        snapped.y = kind === 'floor' ? 0.2 : 2;
-        this.buildPreview.position.copy(snapped);
-        const horizontal = this.buildYawIndex % 2 === 0;
-        if (kind === 'wall') {
-          this.buildPreview.scale.set(horizontal ? 4 : 0.4, 4, horizontal ? 0.4 : 4);
-        } else if (kind === 'floor') {
-          this.buildPreview.scale.set(4, 0.4, 4);
-        } else {
-          this.buildPreview.scale.set(4, 4, 4);
-        }
-        this.buildPreview.visible = true;
-      } else {
-        this.buildPreview.visible = false;
-      }
+      this.updateBuildPreview();
     } else {
       if (this.firstPersonGun) this.firstPersonGun.visible = false;
+      this.buildPreview.visible = false;
       const t = this.elapsed * 0.3;
       this.camera.position.set(Math.cos(t) * 30, 35, Math.sin(t) * 30);
       this.camera.lookAt(0, 0, 0);
     }
 
     this.hud.setHp(this.player.loadout.hp, this.player.loadout.hpMax);
-    this.hud.setWeapon(this.player.loadout.weapon, this.player.loadout.ammo[this.player.loadout.weapon], this.player.ammoMax(this.player.loadout.weapon));
+    this.hud.setWeapon(
+      this.player.loadout.weapon,
+      this.player.loadout.ammo[this.player.loadout.weapon],
+      this.player.ammoMax(this.player.loadout.weapon),
+      this.player.isRechargingWater,
+    );
     this.hud.setMaterials(this.player.loadout.wood, this.player.loadout.stone);
     this.hud.setRemaining(this.aliveCount(), this.agents.length);
-    this.hud.setZoneWarning(this.safeZone.isOutside(this.player.position) && !this.player.eliminated);
+    this.hud.setZoneWarning(
+      this.safeZone.isOutside(this.player.position) && !this.player.eliminated,
+      this.safeZone.secondsUntilShrink,
+    );
     this.hud.setCrosshair(!this.buildMode && !this.player.eliminated);
+    this.updateOverlays(now);
 
     const alive = this.agents.filter((a) => !a.eliminated);
     const playerWon = alive.length === 1 && alive[0].id === PLAYER_ID;
@@ -390,23 +497,134 @@ export class BattleScene implements GameScene {
     }
   }
 
+  /** 視点をなめらかに追従させる。タッチのガタつき対策。 */
+  private updatePlayerLook(deltaX: number, deltaY: number, dt: number): void {
+    const sens = document.pointerLockElement ? MOUSE_SENS : TOUCH_SENS;
+    const blend = Math.min(1, LOOK_SMOOTHING + dt * 6);
+    this.lookVelX += (deltaX * sens - this.lookVelX) * blend;
+    this.lookVelY += (deltaY * sens - this.lookVelY) * blend;
+    if (Math.abs(this.lookVelX) < 0.00002) this.lookVelX = 0;
+    if (Math.abs(this.lookVelY) < 0.00002) this.lookVelY = 0;
+    this.player.yaw -= this.lookVelX;
+    this.player.pitch -= this.lookVelY;
+    this.player.pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.player.pitch));
+  }
+
+  /** プレイヤーの狙い。指では狙いにくいのでエイムアシストを弱くかける。 */
+  private playerAimDirection(): THREE.Vector3 {
+    const look = this.player.lookDirection();
+    this.aimTargets.length = 0;
+    for (const a of this.agents) {
+      if (a.eliminated || a.id === PLAYER_ID) continue;
+      this.aimTargets.push({ id: a.id, point: a.eyePosition });
+    }
+    const params = aimAssistParamsFor(this.touch, this.ctx.save.difficulty);
+    const eye = this.player.eyePosition;
+    const result = applyAimAssist(eye, look, this.aimTargets, params, (target) => {
+      this.tmpVec.copy(target.point).sub(eye);
+      const dist = this.tmpVec.length();
+      if (dist < 0.001) return false;
+      this.tmpVec.divideScalar(dist);
+      const hit = this.collision.raycast(eye, this.tmpVec, dist, agentColliderId(PLAYER_ID));
+      return !hit || hit.collider.id === agentColliderId(target.id);
+    });
+    return result.direction;
+  }
+
+  private updateBuildPreview(): void {
+    if (!this.buildMode) {
+      this.buildPreview.visible = false;
+      return;
+    }
+    const kind = BUILD_ORDER[this.buildKindIndex];
+    const snapped = this.buildTargetPosition();
+    const { center, size } = placePieceAabb(kind, snapped, this.buildYawIndex);
+    this.buildPreview.position.copy(center);
+    this.buildPreview.scale.copy(size);
+    const cost = BUILD_PIECES[kind].costMaterial;
+    const canAfford = this.player.loadout.wood + this.player.loadout.stone >= cost;
+    const blocked = this.build.isBlocked(kind, snapped, this.buildYawIndex);
+    // おけるかどうかを色で伝える（みずいろ = おける／あかむらさき = おけない）
+    this.buildPreviewMaterial.color.setHex(canAfford && !blocked ? 0x80d4ff : 0xff8a80);
+    this.buildPreviewMaterial.opacity = canAfford && !blocked ? 0.45 : 0.3;
+    this.buildPreview.visible = true;
+  }
+
+  private buildTargetPosition(): THREE.Vector3 {
+    const eye = this.player.eyePosition;
+    this.tmpVec2.copy(this.player.lookDirection()).setY(0);
+    if (this.tmpVec2.lengthSq() < 0.0001) this.tmpVec2.set(0, 0, -1);
+    this.tmpVec2.normalize().multiplyScalar(BUILD_DISTANCE);
+    const candidate = eye.clone().add(this.tmpVec2);
+    return new THREE.Vector3(
+      Math.round(candidate.x / BUILD_PIECE_SIZE) * BUILD_PIECE_SIZE,
+      0,
+      Math.round(candidate.z / BUILD_PIECE_SIZE) * BUILD_PIECE_SIZE,
+    );
+  }
+
+  private updateOverlays(now: number): void {
+    this.radarBlips.length = 0;
+    this.nameplateTargets.length = 0;
+    const px = this.player.position.x;
+    const pz = this.player.position.z;
+
+    for (const a of this.agents) {
+      if (a.id === PLAYER_ID) continue;
+      if (!a.eliminated) {
+        this.radarBlips.push({ x: a.position.x - px, z: a.position.z - pz, color: 0xff7043, kind: 'enemy' });
+      }
+      this.nameplateTargets.push({
+        id: a.id,
+        label: a.skin.nameHiragana,
+        color: a.skin.color,
+        hpRatio: a.loadout.hp / a.loadout.hpMax,
+        position: this.nameplateAnchor(a),
+        visible: !a.eliminated && !this.player.eliminated,
+      });
+    }
+    for (const p of this.pickups) {
+      if (!p.available) continue;
+      if (p.kind === 'water-tank') {
+        this.radarBlips.push({ x: p.position.x - px, z: p.position.z - pz, color: 0x4fc3f7, kind: 'water' });
+      } else if (p.kind === 'weapon-chest') {
+        this.radarBlips.push({ x: p.position.x - px, z: p.position.z - pz, color: 0xffd166, kind: 'chest' });
+      }
+    }
+
+    this.hud.update(now, this.radarBlips, this.player.yaw);
+    this.nameplates.update(this.nameplateTargets, this.camera, this.viewport.width, this.viewport.height);
+  }
+
+  private nameplateAnchor(a: Agent): THREE.Vector3 {
+    return new THREE.Vector3(a.position.x, a.position.y + 2.15, a.position.z);
+  }
+
   private tryFire(a: Agent, dir: THREE.Vector3, now: number): void {
     const weapon = WEAPONS[a.loadout.weapon];
     if (now < a.lastFireMs + a.fireCooldownMs(a.loadout.weapon)) return;
-    if (a.loadout.ammo[a.loadout.weapon] < weapon.ammoPerShot) {
-      if (a.id === PLAYER_ID) this.hud.showMessage('💧 みずがない！タンクへ！', 1200);
+    if (!a.canFireWeapon(a.loadout.weapon)) {
+      if (a.id === PLAYER_ID && now >= this.nextOutOfWaterMessageAt) {
+        this.nextOutOfWaterMessageAt = now + 2600;
+        this.hud.showMessage(
+          weapon.refillPerSecond > 0 ? '💧 みずを ためてるよ… ちょっとまってね' : '💧 みずがない！タンクへ！',
+          1300,
+        );
+      }
       return;
     }
     a.lastFireMs = now;
-    a.loadout.ammo[a.loadout.weapon] -= weapon.ammoPerShot;
-    a.playFireVisual(now / 1000);
-    if (a.id === PLAYER_ID && weapon.id === 'water-gun') {
+    a.consumeAmmo(a.loadout.weapon);
+    // AgentVisual はバトル開始からの経過秒で動くので、performance.now() ではなく elapsed を渡す
+    a.playFireVisual(this.elapsed);
+    if (a.id === PLAYER_ID) {
       this.firstPersonGunUntil = now + 260;
     }
 
     const eye = a.eyePosition;
     if (a.isCpu) this.splash.burst(eye.clone().add(dir.clone().multiplyScalar(0.75)), 3, 2.2);
     const damageMult = a.isCpu ? DIFFICULTY[this.ctx.save.difficulty].damageMultiplier : 1;
+    const fromPlayer = a.id === PLAYER_ID;
     for (let i = 0; i < weapon.pellets; i++) {
       const spread = new THREE.Vector3(
         (Math.random() - 0.5) * weapon.spreadRad,
@@ -415,7 +633,7 @@ export class BattleScene implements GameScene {
       );
       const d = dir.clone().add(spread).normalize();
       const muzzle = eye.clone().add(d.clone().multiplyScalar(0.6));
-      const pr = spawnProjectile(this.scene, weapon.id, weapon, muzzle, d, a.id, weapon.damage * damageMult);
+      const pr = spawnProjectile(this.scene, weapon.id, weapon, muzzle, d, a.id, weapon.damage * damageMult, fromPlayer);
       this.projectiles.push(pr);
     }
 
@@ -428,15 +646,16 @@ export class BattleScene implements GameScene {
   }
 
   private onProjectileHit(pr: Projectile, point: THREE.Vector3, hitColliderId: string): void {
-    this.splash.burst(point, 10, 5);
-    this.ctx.audio.playSfx('splash');
+    this.splash.burst(point, 12, 5.5);
+    this.playNearbySfx('splash', point, 34);
     const reactedAgents = new Set<string>();
 
     const agent = this.agents.find((a) => this.collisionByAgent.get(a.id) === hitColliderId);
     if (agent) {
       this.applyProjectileDamage(agent, pr.damage, pr.attackerId, point, reactedAgents);
     } else if (hitColliderId.startsWith('build-')) {
-      this.build.damagePiece(hitColliderId, pr.damage);
+      const destroyed = this.build.damagePiece(hitColliderId, pr.damage);
+      if (destroyed) this.splash.burst(point, 10, 4);
     }
 
     if (pr.splashRadius > 0) {
@@ -451,27 +670,53 @@ export class BattleScene implements GameScene {
     }
   }
 
-  private applyProjectileDamage(agent: Agent, damage: number, attackerId: string, point: THREE.Vector3, reactedAgents: Set<string>): void {
+  private applyProjectileDamage(
+    agent: Agent,
+    damage: number,
+    attackerId: string,
+    point: THREE.Vector3,
+    reactedAgents: Set<string>,
+  ): void {
     if (agent.eliminated) return;
     const attacker = this.agents.find((a) => a.id === attackerId) ?? null;
     if (!reactedAgents.has(agent.id)) {
       agent.playHitVisual(this.elapsed);
       const splashPoint = agent.position.clone();
       splashPoint.y += 1;
-      this.splash.burst(splashPoint.lerp(point, 0.35), agent.id === PLAYER_ID ? 8 : 5, agent.id === PLAYER_ID ? 4 : 3);
-      if (agent.id === PLAYER_ID && attackerId !== PLAYER_ID) this.showPlayerHitFeedback();
+      this.splash.burst(splashPoint.lerp(point, 0.35), agent.id === PLAYER_ID ? 10 : 7, agent.id === PLAYER_ID ? 4.5 : 3.4);
+      if (agent.id === PLAYER_ID && attackerId !== PLAYER_ID) {
+        this.showPlayerHitFeedback(attacker);
+      }
       reactedAgents.add(agent.id);
     }
-    if (agent.takeDamage(damage)) {
+    const eliminated = agent.takeDamage(damage);
+    if (attackerId === PLAYER_ID && agent.id !== PLAYER_ID) {
+      this.hud.showHitMarker(damage, eliminated);
+      // バブルシャワーは 1 回で 7 発とぶので、音が重ならないよう間引く
+      const now = performance.now();
+      if (now >= this.nextHitSfxAt) {
+        this.nextHitSfxAt = now + 70;
+        this.ctx.audio.playSfx('water-hit');
+      }
+    }
+    if (eliminated) {
       if (attacker && attacker.id !== agent.id) attacker.eliminations += 1;
       this.onEliminated(agent, attacker);
     }
   }
 
-  private showPlayerHitFeedback(): void {
+  private showPlayerHitFeedback(attacker: Agent | null): void {
     this.hud.showHitFeedback();
-    this.hud.showMessage('💦 みずが あたった！', 850);
     this.ctx.audio.playSfx('water-hit');
+    if (attacker) {
+      // 画面中央からどっち方向に相手がいるかを矢印で示す（レーダーと同じ式を使う）
+      const bearing = screenBearingRad(
+        attacker.position.x - this.player.position.x,
+        attacker.position.z - this.player.position.z,
+        this.player.yaw,
+      );
+      this.hud.showDamageDirection(bearing);
+    }
     this.cameraWobbleStart = performance.now();
     this.cameraWobbleUntil = this.cameraWobbleStart + 260;
     this.cameraWobbleStrength = 0.07;
@@ -485,8 +730,18 @@ export class BattleScene implements GameScene {
     this.camera.position.y += Math.cos(now * 0.071) * strength * 0.55;
   }
 
+  /**
+   * 遠くの音は鳴らさない。CPU が同時に撃つと音が重なってうるさく、
+   * 合成コストも無駄になるため。
+   */
+  private playNearbySfx(name: 'splash', position: THREE.Vector3, maxDistance: number): void {
+    if (this.player.position.distanceTo(position) > maxDistance) return;
+    this.ctx.audio.playSfx(name);
+  }
+
   private onEliminated(victim: Agent, attacker: Agent | null): void {
     this.ctx.audio.playSfx('eliminated');
+    // ぽよんと はじけるあわ（けがや流血の表現はしない）
     const cloud = new THREE.Mesh(
       new THREE.SphereGeometry(1.2, 12, 8),
       new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 }),
@@ -494,11 +749,16 @@ export class BattleScene implements GameScene {
     cloud.position.copy(victim.position);
     cloud.position.y += 1;
     this.scene.add(cloud);
-    setTimeout(() => this.scene.remove(cloud), 1200);
+    this.splash.burst(cloud.position, 18, 6);
+    setTimeout(() => {
+      this.scene.remove(cloud);
+      cloud.geometry.dispose();
+      (cloud.material as THREE.Material).dispose();
+    }, 1200);
     if (victim.id === PLAYER_ID) {
-      this.hud.showMessage('💦 びしょぬれ！\n かんせんモード', 2000);
+      this.hud.showMessage('💦 びしょぬれ！\nみんなを おうえんしよう', 2200);
     } else if (attacker?.id === PLAYER_ID) {
-      this.hud.showMessage(`🎯 ${victim.skin.nameHiragana} を びしょぬれ！`, 1200);
+      this.hud.showMessage(`🎯 ${victim.skin.nameHiragana} を びしょぬれ！`, 1400);
     }
   }
 
@@ -527,21 +787,15 @@ export class BattleScene implements GameScene {
       this.hud.showMessage('🪵 そざいがたりない！', 1000);
       return;
     }
-    const useWood = Math.min(a.loadout.wood, cost);
-    a.loadout.wood -= useWood;
-    a.loadout.stone -= cost - useWood;
-
-    const eye = a.eyePosition;
-    const candidate = eye.clone().add(a.lookDirection().setY(0).normalize().multiplyScalar(4));
-    candidate.y = 0;
-    const snapped = new THREE.Vector3(Math.round(candidate.x / 4) * 4, 0, Math.round(candidate.z / 4) * 4);
+    const snapped = this.buildTargetPosition();
     const placed = this.build.tryPlace(kind, snapped, this.buildYawIndex, a.id, a.skin.color);
     if (!placed) {
-      a.loadout.wood += useWood;
-      a.loadout.stone += cost - useWood;
       this.hud.showMessage('🔨 ここにはおけないよ', 900);
       return;
     }
+    const useWood = Math.min(a.loadout.wood, cost);
+    a.loadout.wood -= useWood;
+    a.loadout.stone -= cost - useWood;
     this.ctx.audio.playSfx('build');
   }
 
@@ -580,37 +834,55 @@ export class BattleScene implements GameScene {
     window.removeEventListener('resize', this.resizeHandler);
     window.visualViewport?.removeEventListener('resize', this.resizeHandler);
     this.input.detach();
+    document.body.classList.remove('skb-touch-mode');
     this.hud.destroy();
+    this.nameplates.destroy();
+    this.pauseOverlay.destroy();
     this.projectiles.forEach((p) => disposeProjectile(this.scene, p));
+    this.projectiles = [];
+    this.splash.dispose();
     this.build.clear();
     if (document.pointerLockElement) document.exitPointerLock();
+    // 同じ canvas を使いまわす（WebGL コンテキストが残る）ので、
+    // ジオメトリとマテリアルを明示的に破棄しないと再戦のたびにリークする。
+    this.camera.remove(this.firstPersonGun);
+    disposeObject3D(this.firstPersonGun);
+    disposeObject3D(this.scene);
+    this.agents = [];
+    this.pickups = [];
     this.renderer.dispose();
   }
 
   private resizeRenderer(): void {
-    const viewport = gameViewportSize();
-    this.renderer.setSize(viewport.width, viewport.height, false);
+    this.viewport = gameViewportSize();
+    this.renderer.setSize(this.viewport.width, this.viewport.height, false);
     if (this.camera) {
-      this.camera.aspect = viewport.width / viewport.height;
+      this.camera.aspect = this.viewport.width / this.viewport.height;
       this.camera.updateProjectionMatrix();
     }
   }
 
   private updateFirstPersonGun(now: number): void {
     if (!this.firstPersonGun) return;
-    const pulse = Math.max(0, Math.min(1, (this.firstPersonGunUntil - now) / 260));
-    if (pulse <= 0) {
-      this.firstPersonGun.visible = false;
-      if (this.firstPersonGunNozzle) this.firstPersonGunNozzle.visible = false;
-      return;
-    }
-    const kick = Math.sin(pulse * Math.PI);
+    // 手にみずでっぽうが常に見えていた方が「じぶんが持っている」と分かりやすい
     this.firstPersonGun.visible = true;
-    this.firstPersonGun.position.set(0.36 + kick * 0.02, -0.28 - kick * 0.02, -0.78 + kick * 0.12);
-    this.firstPersonGun.rotation.set(-0.12 - kick * 0.08, -0.24, 0.05 + kick * 0.04);
+    const pulse = Math.max(0, Math.min(1, (this.firstPersonGunUntil - now) / 260));
+    // 撃った瞬間がいちばん強くなるようにする（sin だと反動が遅れて見える）
+    const kick = pulse * (2 - pulse);
+    const moving = Math.hypot(this.player.velocity.x, this.player.velocity.z) > 0.5;
+    const bobPhase = this.elapsed * (moving ? 8.5 : 1.6);
+    const bobX = Math.sin(bobPhase) * (moving ? 0.016 : 0.004);
+    const bobY = Math.abs(Math.cos(bobPhase)) * (moving ? 0.014 : 0.004);
+
+    this.firstPersonGun.position.set(
+      FP_GUN_BASE.x + bobX + kick * 0.02,
+      FP_GUN_BASE.y + bobY - kick * 0.03,
+      FP_GUN_BASE.z + kick * 0.1,
+    );
+    this.firstPersonGun.rotation.set(-0.04 - kick * 0.2 + bobY * 0.6, 0.26 + bobX * 0.8, 0.02 + kick * 0.05);
     if (this.firstPersonGunNozzle) {
-      this.firstPersonGunNozzle.visible = pulse > 0.1;
-      this.firstPersonGunNozzle.scale.setScalar(1 + kick * 1.4);
+      this.firstPersonGunNozzle.visible = kick > 0.05;
+      this.firstPersonGunNozzle.scale.setScalar(0.6 + kick * 1.6);
     }
   }
 }

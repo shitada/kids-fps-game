@@ -54,3 +54,34 @@ describe('BuildManager', () => {
     expect(mgr.getPiece(piece.id)).toBeUndefined();
   });
 });
+
+describe('BuildManager.isBlocked', () => {
+  it('reports free space as not blocked', () => {
+    const collision = new CollisionWorld();
+    const scene = { add: () => {}, remove: () => {} } as unknown as THREE.Scene;
+    const mgr = new BuildManager(scene, collision);
+    expect(mgr.isBlocked('wall', new THREE.Vector3(8, 0, 0), 0)).toBe(false);
+  });
+
+  it('reports occupied space as blocked', () => {
+    const collision = new CollisionWorld();
+    collision.add({
+      id: 'blocker',
+      aabb: makeAABB(new THREE.Vector3(8, 2, 0), new THREE.Vector3(4, 4, 4)),
+      blocksMovement: true,
+      blocksProjectile: true,
+    });
+    const scene = { add: () => {}, remove: () => {} } as unknown as THREE.Scene;
+    const mgr = new BuildManager(scene, collision);
+    expect(mgr.isBlocked('wall', new THREE.Vector3(8, 0, 0), 0)).toBe(true);
+  });
+
+  it('agrees with tryPlace', () => {
+    const collision = new CollisionWorld();
+    const scene = { add: () => {}, remove: () => {} } as unknown as THREE.Scene;
+    const mgr = new BuildManager(scene, collision);
+    expect(mgr.isBlocked('floor', new THREE.Vector3(12, 0, 0), 0)).toBe(false);
+    expect(mgr.tryPlace('floor', new THREE.Vector3(12, 0, 0), 0, 'p1', 0x00ff00)).not.toBeNull();
+    expect(mgr.isBlocked('floor', new THREE.Vector3(12, 0, 0), 0)).toBe(true);
+  });
+});
