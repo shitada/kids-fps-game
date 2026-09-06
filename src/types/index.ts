@@ -73,8 +73,10 @@ export interface MapConfig {
   nameHiragana: string;
   emoji: string;
   groundColor: number;
-  /** 地面のまだら模様に使う 2 色目。省略時は groundColor から自動生成する。 */
+  /** 道と広場のアクセント色。 */
   groundAccentColor?: number;
+  /** 景観だけを切り替える。移動・補給・境界のルールは共通。 */
+  theme?: 'pool' | 'castle' | 'cloud';
   skyColor: number;
   /** 天頂の空の色。地平線側は skyColor を使う。 */
   skyTopColor?: number;
@@ -89,12 +91,28 @@ export interface MapConfig {
   scatter?: ScatterGroup[];
 }
 
-export interface Decoration {
+export interface PrimitiveDecoration {
   kind: 'box' | 'cylinder' | 'pyramid' | 'sphere';
+  /** 旧形式のプリミティブは中心座標。 */
   position: [number, number, number];
   size: [number, number, number];
   color: number;
 }
+
+export interface ParkDecoration {
+  kind: 'splash-pad' | 'inflatable' | 'parasol' | 'slide-tower' | 'fountain-pipes'
+    | 'castle-gate' | 'castle-tower' | 'hedge' | 'fountain'
+    | 'rainbow-gate' | 'cloud-cover' | 'balloon';
+  /** プレハブの地面側の原点。size は幅・高さ・奥行き。 */
+  position: [number, number, number];
+  size: [number, number, number];
+  color: number;
+  accent?: number;
+  /** AABB と見た目を一致させるため、水平回転は90度ずつ。 */
+  quarterTurns?: 0 | 1 | 2 | 3;
+}
+
+export type Decoration = PrimitiveDecoration | ParkDecoration;
 
 export type ScatterKind = 'tree' | 'bush' | 'flower' | 'ball' | 'floaty' | 'cloudlet';
 

@@ -271,6 +271,7 @@ export class TouchInput implements InputSource {
 
   private makeKnob(layout: TouchLayout): HTMLDivElement {
     const el = document.createElement('div');
+    el.className = 'skb-joystick-knob';
     el.style.cssText = `
       width: ${layout.joystickKnob}px; height: ${layout.joystickKnob}px;
       border-radius: 50%;
@@ -286,7 +287,7 @@ export class TouchInput implements InputSource {
     el.className = 'skb-action-btn skb-fire-btn';
     el.setAttribute('role', 'button');
     el.setAttribute('aria-label', 'うつ');
-    el.textContent = '💦';
+    el.innerHTML = '<span class="skb-action-icon" aria-hidden="true">◉</span><span class="skb-action-label" aria-hidden="true">うつ</span>';
     el.style.cssText = `
       position: absolute;
       right: calc(${layout.edgeInset}px + env(safe-area-inset-right, 0px));
@@ -312,7 +313,15 @@ export class TouchInput implements InputSource {
     el.className = `skb-action-btn skb-action-${id}`;
     el.setAttribute('role', 'button');
     el.setAttribute('aria-label', meta.aria);
-    el.textContent = meta.icon;
+    const icon = document.createElement('span');
+    icon.className = 'skb-action-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = { jump: '↑', build: '▧', swap: '⇄', rotate: '↶' }[id];
+    const label = document.createElement('span');
+    label.className = 'skb-action-label';
+    label.setAttribute('aria-hidden', 'true');
+    label.textContent = meta.aria;
+    el.append(icon, label);
     el.style.cssText = `
       width: ${layout.actionSize}px; height: ${layout.actionSize}px;
       border-radius: 50%;

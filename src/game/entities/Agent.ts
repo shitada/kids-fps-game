@@ -80,6 +80,7 @@ export class Agent {
     this.mesh.position.copy(this.position);
     this.mesh.rotation.y = this.yaw;
     this.mesh.visible = !this.eliminated;
+    this.visual.setWeapon(this.loadout.weapon);
     this.visual.update({
       elapsedSec,
       moveSpeed: Math.hypot(this.velocity.x, this.velocity.z),

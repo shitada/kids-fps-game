@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import { disposeObject3D } from '@/game/systems/disposeObject';
+import { toyBox, disposeSharedVisualResources } from '@/game/systems/VisualResources';
 
 describe('disposeObject3D', () => {
   it('disposes every geometry and material under the root', () => {
@@ -59,5 +60,22 @@ describe('disposeObject3D', () => {
     const root = new THREE.Group();
     root.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial()));
     expect(disposeObject3D(root)).toBe(2);
+  });
+
+  it('keeps app-owned toy resources alive when a scene is removed', () => {
+    const first = new THREE.Group();
+    const second = new THREE.Group();
+    const a = toyBox(1, 1, 1, 0x32bfce);
+    const b = toyBox(1, 1, 1, 0x32bfce);
+    first.add(a);
+    second.add(b);
+    let disposals = 0;
+    a.geometry.addEventListener('dispose', () => disposals++);
+    expect(a.geometry).toBe(b.geometry);
+    expect(disposeObject3D(first)).toBe(0);
+    expect(disposals).toBe(0);
+    expect(second.children).toHaveLength(1);
+    disposeSharedVisualResources();
+    expect(disposals).toBe(1);
   });
 });

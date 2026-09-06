@@ -24,7 +24,6 @@ interface DamageArrow {
   angleRad: number;
 }
 
-const FONT = "'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', sans-serif";
 const RADAR_RANGE = 45;
 const DAMAGE_ARROW_MS = 1100;
 
@@ -52,6 +51,7 @@ export class Hud {
   private materialsEl!: HTMLDivElement;
   private remainingEl!: HTMLDivElement;
   private modeEl!: HTMLDivElement;
+  private buildValidityEl!: HTMLDivElement;
   private crosshair!: HTMLDivElement;
   private hitMarker!: HTMLDivElement;
   private zoneEl!: HTMLDivElement;
@@ -77,16 +77,13 @@ export class Hud {
   private lastRemainingText = '';
   private lastAmmoColor = '';
   private lastZoneText = '';
+  private building = false;
+  private reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
   constructor(root: HTMLElement) {
     this.root = root;
     this.el = document.createElement('div');
     this.el.id = 'skb-hud';
-    this.el.style.cssText = `
-      position:absolute; inset:0; pointer-events:none; color:#fff;
-      font-family: ${FONT};
-      text-shadow: 0 1px 4px rgba(0,0,0,0.5);
-    `;
     this.build();
     this.root.appendChild(this.el);
   }
@@ -95,22 +92,23 @@ export class Hud {
     // 左下：ぬれ度ゲージ
     const hpWrap = document.createElement('div');
     hpWrap.className = 'skb-hp';
-    hpWrap.style.cssText = 'position:absolute;left:18px;bottom:18px;width:280px;';
     const label = document.createElement('div');
     label.className = 'skb-hp-label';
-    label.textContent = 'ぬれ度';
-    label.style.cssText = 'font-size:18px;font-weight:700;margin-bottom:6px;';
+    label.innerHTML = 'ぬれ度 <small>のこりの げんき</small>';
     hpWrap.appendChild(label);
     const barOuter = document.createElement('div');
-    barOuter.style.cssText =
-      'height:18px;background:rgba(0,0,0,0.35);border-radius:9px;overflow:hidden;border:2px solid rgba(255,255,255,0.6);';
+    barOuter.className = 'skb-meter-track';
+    barOuter.setAttribute('role', 'meter');
+    barOuter.setAttribute('aria-label', 'のこりの げんき');
+    barOuter.setAttribute('aria-valuemin', '0');
+    barOuter.setAttribute('aria-valuemax', '100');
     const barInner = document.createElement('div');
-    barInner.style.cssText = 'height:100%;width:100%;background:linear-gradient(90deg,#7ee081,#34c759);transition:width 0.15s, background 0.2s;';
+    barInner.className = 'skb-meter-fill';
+    barInner.style.background = '#38988a';
     barOuter.appendChild(barInner);
     hpWrap.appendChild(barOuter);
     const hpText = document.createElement('div');
     hpText.className = 'skb-hp-text';
-    hpText.style.cssText = 'font-size:14px;margin-top:4px;';
     hpWrap.appendChild(hpText);
     this.el.appendChild(hpWrap);
     this.hpBar = barInner;
@@ -120,15 +118,16 @@ export class Hud {
     // 右下：武器・弾数
     const weaponWrap = document.createElement('div');
     weaponWrap.className = 'skb-weapon';
-    weaponWrap.style.cssText = 'position:absolute;right:18px;bottom:18px;text-align:right;';
     const weaponName = document.createElement('div');
     weaponName.className = 'skb-weapon-name';
-    weaponName.style.cssText = 'font-size:22px;font-weight:700;';
     weaponWrap.appendChild(weaponName);
     const ammoText = document.createElement('div');
     ammoText.className = 'skb-ammo';
-    ammoText.style.cssText = 'font-size:36px;font-weight:900;';
     weaponWrap.appendChild(ammoText);
+    const waterLabel = document.createElement('div');
+    waterLabel.className = 'skb-water-label';
+    waterLabel.textContent = 'のこりの みず';
+    weaponWrap.appendChild(waterLabel);
     this.el.appendChild(weaponWrap);
     this.weaponEl = weaponName;
     this.ammoEl = ammoText;
@@ -136,37 +135,31 @@ export class Hud {
     // 左上：素材
     const matWrap = document.createElement('div');
     matWrap.className = 'skb-materials';
-    matWrap.style.cssText = 'position:absolute;left:18px;top:18px;font-size:18px;font-weight:700;';
     this.el.appendChild(matWrap);
     this.materialsEl = matWrap;
 
     // 中央上：残り人数
     const remain = document.createElement('div');
     remain.className = 'skb-remaining';
-    remain.style.cssText =
-      'position:absolute;left:50%;top:18px;transform:translateX(-50%);font-size:18px;font-weight:700;background:rgba(0,0,0,0.35);padding:6px 14px;border-radius:14px;';
     this.el.appendChild(remain);
     this.remainingEl = remain;
 
     // 右上：モード（撃つ/つくる）
     const mode = document.createElement('div');
     mode.className = 'skb-mode';
-    mode.style.cssText =
-      'position:absolute;right:18px;top:64px;font-size:18px;font-weight:700;background:rgba(0,0,0,0.35);padding:6px 14px;border-radius:14px;';
     this.el.appendChild(mode);
     this.modeEl = mode;
+    const buildValidity = document.createElement('div');
+    buildValidity.className = 'skb-build-validity';
+    this.el.appendChild(buildValidity);
+    this.buildValidityEl = buildValidity;
 
     // 右上：ポーズボタン（タッチでもキーボードでも押せる）
     const pause = document.createElement('button');
     pause.className = 'skb-pause-btn';
     pause.setAttribute('aria-label', 'おやすみ');
     pause.textContent = '⏸';
-    pause.style.cssText = `
-      position:absolute;right:18px;top:14px;width:42px;height:42px;border-radius:50%;
-      border:2px solid rgba(255,255,255,0.75);background:rgba(0,0,0,0.35);color:#fff;
-      font-size:20px;line-height:1;cursor:pointer;pointer-events:auto;font-family:${FONT};
-      z-index:50;
-    `;
+    pause.type = 'button';
     this.el.appendChild(pause);
     this.pauseButton = pause;
 
@@ -175,7 +168,8 @@ export class Hud {
     radar.className = 'skb-radar';
     radar.width = 132;
     radar.height = 132;
-    radar.style.cssText = 'position:absolute;left:18px;top:56px;width:110px;height:110px;opacity:0.92;';
+    radar.setAttribute('role', 'img');
+    radar.setAttribute('aria-label', 'まわりの なかまと みずの レーダー');
     this.el.appendChild(radar);
     this.radarCanvas = radar;
     this.radarCtx = radar.getContext('2d');
@@ -199,8 +193,7 @@ export class Hud {
     // ゾーン警告
     const zone = document.createElement('div');
     zone.className = 'skb-zone';
-    zone.style.cssText =
-      'position:absolute;left:50%;top:60px;transform:translateX(-50%);font-size:16px;font-weight:700;color:#fff;background:rgba(230,81,0,0.82);padding:6px 12px;border-radius:10px;display:none;';
+    zone.setAttribute('role', 'status');
     zone.textContent = '☀️ そとはあついよ！まんなかへ！';
     zone.style.display = 'none';
     this.el.appendChild(zone);
@@ -209,8 +202,7 @@ export class Hud {
     // メッセージ
     const msg = document.createElement('div');
     msg.className = 'skb-message';
-    msg.style.cssText =
-      'position:absolute;left:50%;top:34%;transform:translate(-50%,-50%);font-size:34px;font-weight:900;color:#fff;background:rgba(0,0,0,0.4);padding:14px 24px;border-radius:18px;display:none;white-space:pre-line;text-align:center;';
+    msg.setAttribute('role', 'status');
     msg.style.display = 'none';
     this.el.appendChild(msg);
     this.messageEl = msg;
@@ -261,13 +253,14 @@ export class Hud {
     const ratio = max > 0 ? Math.max(0, Math.min(1, hp / max)) : 0;
     const pct = ratio * 100;
     this.hpBar.style.width = `${pct.toFixed(1)}%`;
+    this.hpBar.parentElement?.setAttribute('aria-valuenow', String(Math.round(pct)));
     // ぬれ度は「体力」ではなく「まだ乾いている割合」として見せる
     this.hpBar.style.background =
       ratio > 0.55
-        ? 'linear-gradient(90deg,#7ee081,#34c759)'
+        ? '#38988a'
         : ratio > 0.25
-          ? 'linear-gradient(90deg,#ffe066,#ffb300)'
-          : 'linear-gradient(90deg,#ff8a65,#ff5252)';
+          ? '#dca739'
+          : '#df795f';
     const text = `${Math.round(hp)} / ${max}`;
     if (text !== this.lastHpText) {
       this.hpText.textContent = text;
@@ -275,7 +268,7 @@ export class Hud {
     }
     this.lowHpVignette.style.opacity = ratio < 0.3 ? String(0.35 + (0.3 - ratio) * 2) : '0';
     // Element.animate は古い WebKit にないことがあるので存在チェックしてから使う
-    if (ratio <= 0.25 && this.lastHpRatio > 0.25 && typeof this.hpWrap.animate === 'function') {
+    if (!this.reducedMotion && ratio <= 0.25 && this.lastHpRatio > 0.25 && typeof this.hpWrap.animate === 'function') {
       this.hpWrap.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.12)' }, { transform: 'scale(1)' }], {
         duration: 380,
         easing: 'ease-out',
@@ -289,7 +282,7 @@ export class Hud {
     const name = recharging ? `${wc.emoji} みずをためてるよ` : `${wc.emoji} ${wc.nameHiragana}`;
     if (name !== this.lastWeaponText) {
       this.weaponEl.textContent = name;
-      this.weaponEl.style.color = recharging ? '#ffd166' : '#fff';
+      this.weaponEl.style.color = recharging ? '#916414' : '#214b50';
       this.lastWeaponText = name;
     }
     const ammoText = `${ammo} / ${ammoMax}`;
@@ -297,7 +290,7 @@ export class Hud {
       this.ammoEl.textContent = ammoText;
       this.lastAmmoText = ammoText;
     }
-    const color = recharging ? '#ffd166' : ammo <= 0 ? '#ff8a65' : '#fff';
+    const color = recharging ? '#916414' : ammo <= 0 ? '#a54532' : '#176e75';
     if (color !== this.lastAmmoColor) {
       this.ammoEl.style.color = color;
       this.lastAmmoColor = color;
@@ -305,21 +298,34 @@ export class Hud {
   }
 
   setBuildMode(active: boolean, kind?: BuildPieceKind): void {
+    this.building = active && kind !== undefined;
     if (active && kind) {
       const conf = BUILD_PIECES[kind];
       const labels: Record<BuildPieceKind, string> = { wall: 'かべ', floor: 'ゆか', stair: 'かいだん' };
       this.modeEl.textContent = `🔨 つくる：${labels[kind]} (${conf.costMaterial})`;
-      this.modeEl.style.color = '#ffd166';
+      this.modeEl.style.color = '#916414';
     } else {
       this.modeEl.textContent = '💦 たたかう';
-      this.modeEl.style.color = '#fff';
+      this.modeEl.style.color = '#214b50';
+      this.buildValidityEl.textContent = '';
+      this.buildValidityEl.style.display = 'none';
     }
   }
 
+  /** Optional companion to the existing placement preview; never relies on color alone. */
+  setBuildPlacement(allowed: boolean): void {
+    if (!this.building) return;
+    const text = allowed ? 'ここに おける' : 'ここには おけない';
+    if (this.buildValidityEl.textContent === text) return;
+    this.buildValidityEl.textContent = text;
+    this.buildValidityEl.dataset.valid = String(allowed);
+    this.buildValidityEl.style.display = 'block';
+  }
+
   setMaterials(wood: number, stone: number): void {
-    const text = `🌳 ${wood} &nbsp;&nbsp; 🪨 ${stone}`;
+    const text = `き ${wood}　いし ${stone}`;
     if (text === this.lastMaterialsText) return;
-    this.materialsEl.innerHTML = text;
+    this.materialsEl.textContent = text;
     this.lastMaterialsText = text;
   }
 
@@ -335,10 +341,10 @@ export class Hud {
     let background = '';
     if (show) {
       text = '☀️ そとはあついよ！まんなかへ！';
-      background = 'rgba(230,81,0,0.85)';
+      background = '#a54a32';
     } else if (secondsToShrink !== undefined && secondsToShrink > 0 && secondsToShrink <= 10) {
       text = `☀️ ${Math.ceil(secondsToShrink)}びょうで ひろばが ちいさくなるよ`;
-      background = 'rgba(2,119,189,0.8)';
+      background = '#176e75';
     }
     if (text === this.lastZoneText) return;
     this.lastZoneText = text;
@@ -430,7 +436,9 @@ export class Hud {
         this.floatingTexts.splice(i, 1);
         continue;
       }
-      f.el.style.transform = `translate(calc(-50% + ${f.x}px), ${(-46 * t).toFixed(1)}px) scale(${(1 + 0.25 * (1 - t)).toFixed(2)})`;
+      if (!this.reducedMotion) {
+        f.el.style.transform = `translate(calc(-50% + ${f.x}px), ${(-46 * t).toFixed(1)}px) scale(${(1 + 0.25 * (1 - t)).toFixed(2)})`;
+      }
       f.el.style.opacity = String(1 - t * t);
     }
 
@@ -461,10 +469,15 @@ export class Hud {
 
     ctx.beginPath();
     ctx.arc(half, half, half - 3, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(6,40,70,0.42)';
+    ctx.fillStyle = '#eaf4e9';
     ctx.fill();
     ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+    ctx.strokeStyle = '#fffaf0';
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(half, half, half - 8, 0, Math.PI * 2);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#8bbbb0';
     ctx.stroke();
 
     // 自分の向きが常に上になるように回す
@@ -496,7 +509,7 @@ export class Hud {
     ctx.lineTo(half - 6.5, half + 6);
     ctx.lineTo(half + 6.5, half + 6);
     ctx.closePath();
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = '#176e75';
     ctx.fill();
   }
 

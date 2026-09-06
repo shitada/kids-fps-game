@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { WeaponConfig } from '@/types';
+import { flatMaterial, sharedBasicMaterial, sharedGeometry, toyMaterial } from '@/game/systems/VisualResources';
 
 export interface Projectile {
   id: string;
@@ -19,21 +20,21 @@ export interface Projectile {
 }
 
 // 子供でも弾すじが目で追えるように、見た目はかなり大きめにしている。
-const balloonGeo = new THREE.SphereGeometry(0.34, 12, 10);
-const waterGeo = new THREE.SphereGeometry(0.2, 10, 8);
-const bubbleGeo = new THREE.SphereGeometry(0.22, 10, 8);
+const balloonGeo = sharedGeometry('balloon-projectile', () => new THREE.SphereGeometry(0.34, 16, 12));
+const waterGeo = sharedGeometry('water-projectile', () => new THREE.SphereGeometry(0.2, 12, 8).scale(0.85, 0.85, 1.45));
+const bubbleGeo = sharedGeometry('bubble-projectile', () => new THREE.SphereGeometry(0.22, 12, 10));
 // しっぽを -Z（進行方向の後ろ）へ伸ばしたいので、ジオメトリ自体を寝かせておく。
 // メッシュ側を回すと scale.z が長さではなく太さに効いてしまうため。
-const trailGeo = new THREE.CylinderGeometry(0.02, 0.09, 1, 8, 1, true).rotateX(Math.PI / 2);
-const haloGeo = new THREE.SphereGeometry(0.34, 10, 8);
+const trailGeo = sharedGeometry('water-trail', () => new THREE.CylinderGeometry(0.02, 0.09, 1, 8, 1, true).rotateX(Math.PI / 2));
+const haloGeo = sharedGeometry('projectile-halo', () => new THREE.TorusGeometry(0.3, 0.026, 5, 16));
 
-const balloonMat = new THREE.MeshBasicMaterial({ color: 0xa8e6ff });
-const waterMat = new THREE.MeshBasicMaterial({ color: 0xf2fdff });
-const bubbleMat = new THREE.MeshBasicMaterial({ color: 0xd6f4ff, transparent: true, opacity: 0.95 });
-const waterTrailMat = new THREE.MeshBasicMaterial({ color: 0x7fd8ff, transparent: true, opacity: 0.62, depthWrite: false, side: THREE.DoubleSide });
-const balloonTrailMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide });
-const bubbleTrailMat = new THREE.MeshBasicMaterial({ color: 0xe9fbff, transparent: true, opacity: 0.42, depthWrite: false, side: THREE.DoubleSide });
-const enemyHaloMat = new THREE.MeshBasicMaterial({ color: 0xffb74d, transparent: true, opacity: 0.32, depthWrite: false });
+const balloonMat = toyMaterial(0xffc36a, 0.24);
+const waterMat = toyMaterial(0x79dcec, 0.2);
+const bubbleMat = toyMaterial(0xc1eeff, 0.18);
+const waterTrailMat = sharedBasicMaterial('water-trail', { color: 0x7fd8ff, transparent: true, opacity: 0.62, depthWrite: false, side: THREE.DoubleSide });
+const balloonTrailMat = sharedBasicMaterial('balloon-trail', { color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide });
+const bubbleTrailMat = sharedBasicMaterial('bubble-trail', { color: 0xe9fbff, transparent: true, opacity: 0.42, depthWrite: false, side: THREE.DoubleSide });
+const enemyHaloMat = flatMaterial(0xffa46d);
 
 const projectileForward = new THREE.Vector3(0, 0, -1);
 const projectileDirection = new THREE.Vector3();
@@ -68,16 +69,31 @@ export function spawnProjectile(
   const mesh = new THREE.Mesh(geo, mat);
   mesh.userData.kind = 'projectile';
   mesh.frustumCulled = false;
+  const glint = new THREE.Mesh(
+    sharedGeometry('projectile-glint', () => new THREE.SphereGeometry(0.055, 8, 6)),
+    flatMaterial(0xffffff),
+  );
+  glint.position.set(-0.07, 0.09, -0.14);
+  glint.scale.set(0.7, 1, 1.5);
+  mesh.add(glint);
+  if (weaponId === 'balloon-launcher') {
+    const knot = new THREE.Mesh(
+      sharedGeometry('balloon-knot', () => new THREE.ConeGeometry(0.065, 0.14, 8)),
+      balloonMat,
+    );
+    knot.rotation.x = Math.PI / 2;
+    knot.position.z = 0.37;
+    mesh.add(knot);
+  }
 
   const trail = makeTrail(weaponId);
   mesh.add(trail);
 
-  // 敵の弾だけオレンジのふちどりを付けて「よけなきゃ」と分かるようにする。
-  // 自分の弾には付けない（半とうめいの重ね描きを減らすため）。
+  // 相手の水には、明るい輪を付けて見分けやすくする。
   if (!fromPlayer) {
     const halo = new THREE.Mesh(haloGeo, enemyHaloMat);
     halo.name = 'projectile-halo';
-    halo.scale.setScalar(1.9);
+    halo.scale.setScalar(weaponId === 'balloon-launcher' ? 1.35 : 1);
     mesh.add(halo);
   }
 

@@ -3,6 +3,7 @@ import type { BuildPieceKind } from '@/types';
 import { BUILD_PIECES, BUILD_PIECE_SIZE } from '@/game/config/build';
 import { CollisionWorld, makeAABB } from '@/game/systems/CollisionWorld';
 import { disposeObject3D } from '@/game/systems/disposeObject';
+import { roundedBox, sharedGeometry, toyMaterial } from '@/game/systems/VisualResources';
 
 export interface BuildPiece {
   id: string;
@@ -15,62 +16,53 @@ export interface BuildPiece {
 
 let buildCounter = 0;
 
-function meshFor(kind: BuildPieceKind, ownerColor: number): THREE.Object3D {
-  const mat = new THREE.MeshLambertMaterial({ color: ownerColor });
-  const trimColor = new THREE.Color(ownerColor).lerp(new THREE.Color(0xffffff), 0.45).getHex();
-  const trimMat = new THREE.MeshLambertMaterial({ color: trimColor });
-
-  switch (kind) {
-    case 'wall': {
-      const group = new THREE.Group();
-      const panel = new THREE.Mesh(new THREE.BoxGeometry(BUILD_PIECE_SIZE, BUILD_PIECE_SIZE, 0.4), mat);
-      group.add(panel);
-      // わくを付けると「じぶんが作ったもの」が見て分かりやすい
-      const frameThickness = 0.28;
-      const top = new THREE.Mesh(new THREE.BoxGeometry(BUILD_PIECE_SIZE, frameThickness, 0.46), trimMat);
-      top.position.y = BUILD_PIECE_SIZE / 2 - frameThickness / 2;
-      const bottom = top.clone();
-      bottom.position.y = -top.position.y;
-      const left = new THREE.Mesh(new THREE.BoxGeometry(frameThickness, BUILD_PIECE_SIZE, 0.46), trimMat);
-      left.position.x = -BUILD_PIECE_SIZE / 2 + frameThickness / 2;
-      const right = left.clone();
-      right.position.x = -left.position.x;
-      group.add(top, bottom, left, right);
-      return group;
+export function createBuildVisual(
+  kind: BuildPieceKind,
+  ownerColor: number,
+  previewMaterial?: THREE.Material,
+  outlineMaterial?: THREE.LineBasicMaterial,
+): THREE.Group {
+  const tint = new THREE.Color(ownerColor).lerp(new THREE.Color(0xfff3d9), 0.45).getHex();
+  const body = previewMaterial ?? toyMaterial(tint, 0.55);
+  const trim = previewMaterial ?? toyMaterial(0xfff3d9, 0.5);
+  const group = new THREE.Group();
+  group.name = `toy-build-${kind}`;
+  const size = BUILD_PIECE_SIZE;
+  const block = (w: number, h: number, d: number, material: THREE.Material, x = 0, y = 0, z = 0) => {
+    const mesh = new THREE.Mesh(roundedBox(w, h, d, 0.1), material);
+    mesh.position.set(x, y, z);
+    if (outlineMaterial) {
+      const edges = sharedGeometry(`build-boundary-${w}-${h}-${d}`, () => {
+        const boundary = new THREE.BoxGeometry(w, h, d);
+        const geometry = new THREE.EdgesGeometry(boundary);
+        boundary.dispose();
+        return geometry;
+      });
+      const outline = new THREE.LineSegments(edges, outlineMaterial);
+      outline.name = 'build-preview-outline';
+      mesh.add(outline);
     }
-    case 'floor': {
-      const group = new THREE.Group();
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(BUILD_PIECE_SIZE, 0.4, BUILD_PIECE_SIZE), mat);
-      group.add(slab);
-      const plankCount = 4;
-      for (let i = 0; i < plankCount; i++) {
-        const plank = new THREE.Mesh(new THREE.BoxGeometry(BUILD_PIECE_SIZE * 0.92, 0.1, 0.16), trimMat);
-        plank.position.set(0, 0.22, -BUILD_PIECE_SIZE / 2 + ((i + 0.5) * BUILD_PIECE_SIZE) / plankCount);
-        group.add(plank);
-      }
-      return group;
+    group.add(mesh);
+  };
+  if (kind === 'wall') {
+    for (let row = 0; row < 4; row++) {
+      block(size, 0.98, 0.4, row % 2 ? body : trim, 0, -1.5 + row);
     }
-    case 'stair': {
-      // かいだんは「のぼれる形」に見えるよう、実際に段を作る
-      const group = new THREE.Group();
-      const steps = 4;
-      const stepHeight = BUILD_PIECE_SIZE / steps;
-      const stepDepth = BUILD_PIECE_SIZE / steps;
-      for (let i = 0; i < steps; i++) {
-        const step = new THREE.Mesh(
-          new THREE.BoxGeometry(BUILD_PIECE_SIZE, stepHeight * (i + 1), stepDepth),
-          i % 2 === 0 ? mat : trimMat,
-        );
-        step.position.set(
-          0,
-          -BUILD_PIECE_SIZE / 2 + (stepHeight * (i + 1)) / 2,
-          BUILD_PIECE_SIZE / 2 - stepDepth * (i + 0.5),
-        );
-        group.add(step);
+    block(0.28, 3.7, 0.42, body, -1.72);
+    block(0.28, 3.7, 0.42, body, 1.72);
+  } else if (kind === 'floor') {
+    block(size, 0.4, size, body);
+    for (let x = 0; x < 2; x++) {
+      for (let z = 0; z < 2; z++) {
+        block(1.72, 0.02, 1.72, trim, x * 1.9 - 0.95, 0.2, z * 1.9 - 0.95);
       }
-      return group;
+    }
+  } else {
+    for (let i = 0; i < 4; i++) {
+      block(size, i + 1, 1, i % 2 ? trim : body, 0, -size / 2 + (i + 1) / 2, 1.5 - i);
     }
   }
+  return group;
 }
 
 export function snapToGrid(pos: THREE.Vector3): THREE.Vector3 {
@@ -137,7 +129,7 @@ export class BuildManager {
       if (aabbIntersect(aabb, c.aabb)) return null;
     }
 
-    const mesh = meshFor(kind, ownerColor);
+    const mesh = createBuildVisual(kind, ownerColor);
     mesh.position.copy(center);
     if (kind === 'wall' && yawIndex % 2 !== 0) {
       mesh.rotation.y = Math.PI / 2;

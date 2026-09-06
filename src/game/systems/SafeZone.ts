@@ -8,7 +8,7 @@ export interface SafeZoneOptions {
   damagePerSecond?: number;
 }
 
-const WALL_HEIGHT = 9;
+const WALL_HEIGHT = 1.4;
 
 /**
  * 「おひさまが つよくて そとは あつい」エリア。
@@ -43,12 +43,12 @@ export class SafeZone {
     this.visual.name = 'safe-zone';
 
     // 半径 1 で作っておき、以降はスケールだけ変える（毎フレームのジオメトリ再生成を避ける）
-    const ringGeo = new THREE.RingGeometry(1, 1.14, 72);
+    const ringGeo = new THREE.RingGeometry(1, 1.025, 96);
     const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xff8a4c,
+      color: 0xffc36a,
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.75,
+      opacity: 0.85,
       depthWrite: false,
     });
     this.ring = new THREE.Mesh(ringGeo, ringMat);
@@ -58,15 +58,31 @@ export class SafeZone {
 
     const wallGeo = new THREE.CylinderGeometry(1, 1, WALL_HEIGHT, 40, 1, true);
     const wallMat = new THREE.MeshBasicMaterial({
-      color: 0xffb066,
-      side: THREE.BackSide,
+      color: 0xffdb89,
+      side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.2,
+      opacity: 0.12,
       depthWrite: false,
     });
     this.wall = new THREE.Mesh(wallGeo, wallMat);
     this.wall.position.y = WALL_HEIGHT / 2;
     this.visual.add(this.wall);
+
+    const markers = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(0.006, 8, 6),
+      new THREE.MeshBasicMaterial({ color: 0xffe5a8 }),
+      48,
+    );
+    markers.name = 'sunshine-boundary-dots';
+    const marker = new THREE.Object3D();
+    for (let i = 0; i < 48; i++) {
+      const angle = i / 48 * Math.PI * 2;
+      marker.position.set(Math.cos(angle), 0, Math.sin(angle));
+      marker.updateMatrix();
+      markers.setMatrixAt(i, marker.matrix);
+    }
+    markers.position.y = 0.16;
+    this.wall.add(markers);
 
     this.applyRadius();
   }

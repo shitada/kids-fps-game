@@ -79,13 +79,13 @@ export class AgentNameplates {
         el.lastLabel = t.label;
       }
       if (el.lastColor !== t.color) {
-        el.name.style.background = `#${t.color.toString(16).padStart(6, '0')}cc`;
+        el.name.style.setProperty('--nameplate-color', `#${t.color.toString(16).padStart(6, '0')}`);
         el.lastColor = t.color;
       }
       const pct = Math.round(Math.max(0, Math.min(1, t.hpRatio)) * 100);
       if (el.lastPct !== pct) {
         el.barFill.style.width = `${pct}%`;
-        el.barFill.style.background = pct > 55 ? '#7ee081' : pct > 25 ? '#ffd166' : '#ff8a65';
+        el.barFill.style.background = pct > 55 ? '#38988a' : pct > 25 ? '#dca739' : '#df795f';
         el.lastPct = pct;
       }
     }
@@ -110,18 +110,15 @@ export class AgentNameplates {
 
     const root = document.createElement('div');
     root.className = 'skb-nameplate';
-    root.style.cssText = 'position:absolute;left:0;top:0;will-change:transform;text-align:center;';
 
     const name = document.createElement('div');
-    name.style.cssText =
-      "font-size:13px;font-weight:700;color:#fff;padding:2px 8px;border-radius:9px;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,0.6);font-family:'Zen Maru Gothic','Hiragino Maru Gothic ProN',sans-serif;";
+    name.className = 'skb-nameplate-name';
     root.appendChild(name);
 
     const bar = document.createElement('div');
-    bar.style.cssText =
-      'width:58px;height:7px;margin:3px auto 0;background:rgba(0,0,0,0.42);border-radius:4px;overflow:hidden;border:1.5px solid rgba(255,255,255,0.75);';
+    bar.className = 'skb-nameplate-track';
     const fill = document.createElement('div');
-    fill.style.cssText = 'height:100%;width:100%;background:#7ee081;transition:width 0.12s linear;';
+    fill.className = 'skb-nameplate-fill';
     bar.appendChild(fill);
     root.appendChild(bar);
 

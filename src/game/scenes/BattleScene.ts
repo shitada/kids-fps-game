@@ -5,12 +5,12 @@ import { getMapById } from '@/game/config/maps';
 import { buildWorld } from '@/game/systems/WorldBuilder';
 import { CollisionWorld, makeAABB, distanceXZ } from '@/game/systems/CollisionWorld';
 import { Agent, agentColliderId } from '@/game/entities/Agent';
-import { createFirstPersonWaterGun } from '@/game/entities/AgentVisual';
+import { createToolVisual } from '@/game/entities/ToolVisual';
 import { SKINS, SKIN_ORDER } from '@/game/config/skins';
 import { WEAPONS } from '@/game/config/weapons';
 import { BUILD_ORDER, BUILD_PIECES, BUILD_PIECE_SIZE } from '@/game/config/build';
 import { PICKUPS } from '@/game/config/pickups';
-import { BuildManager, placePieceAabb } from '@/game/entities/BuildPiece';
+import { BuildManager, createBuildVisual, placePieceAabb } from '@/game/entities/BuildPiece';
 import { createPickup, setPickupAvailable, refreshPickupRotation, type Pickup } from '@/game/entities/Pickup';
 import { spawnProjectile, disposeProjectile, syncProjectileVisual, type Projectile } from '@/game/entities/Projectile';
 import { WaterSplashPool } from '@/game/effects/WaterSplash';
@@ -25,6 +25,7 @@ import { battleTrackForMap } from '@/game/audio/AudioEngine';
 import { Hud, screenBearingRad, type RadarBlip } from '@/ui/Hud';
 import { AgentNameplates, type NameplateTarget } from '@/ui/AgentNameplates';
 import { PauseOverlay } from '@/ui/PauseOverlay';
+import { contactShadow } from '@/game/systems/VisualResources';
 
 const PLAYER_ID = 'player';
 const NUM_BOTS = 6;
@@ -66,9 +67,12 @@ export class BattleScene implements GameScene {
   private buildMode = false;
   private buildKindIndex = 0;
   private buildYawIndex = 0;
-  private buildPreview!: THREE.Mesh;
+  private buildPreview!: THREE.Group;
+  private previewKind: BuildPieceKind = 'wall';
   private buildPreviewMaterial!: THREE.MeshBasicMaterial;
+  private buildOutlineMaterial!: THREE.LineBasicMaterial;
   private firstPersonGun!: THREE.Group;
+  private firstPersonWeapon: WeaponId = 'water-gun';
   private firstPersonGunNozzle: THREE.Object3D | null = null;
   private firstPersonGunUntil = 0;
   private cameraWobbleUntil = 0;
@@ -80,6 +84,7 @@ export class BattleScene implements GameScene {
   private resizeHandler!: () => void;
   private done = false;
   private paused = false;
+  private renderDirty = true;
   private startedAt = 0;
   private collisionByAgent = new Map<string, string>();
   private touch = false;
@@ -95,6 +100,12 @@ export class BattleScene implements GameScene {
   private colliderSize = new THREE.Vector3(0.9, 1.7, 0.9);
   private nextOutOfWaterMessageAt = 0;
   private nextHitSfxAt = 0;
+  private resultTimer: ReturnType<typeof setTimeout> | null = null;
+  private agentShadows = new Map<Agent, THREE.Mesh>();
+  private visibilityHandler = (): void => {
+    if (document.hidden && !this.done) this.setPaused(true);
+    this.lastFrame = performance.now();
+  };
 
   constructor(mapId: string) {
     this.mapId = mapId;
@@ -105,13 +116,13 @@ export class BattleScene implements GameScene {
     this.map = getMapById(this.mapId);
     this.touch = isTouchDevice();
 
-    this.renderer = new THREE.WebGLRenderer({ canvas: ctx.canvas, antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer = ctx.renderHost.renderer;
     this.resizeRenderer();
 
     this.camera = new THREE.PerspectiveCamera(74, this.viewport.width / this.viewport.height, 0.1, 600);
     const built = buildWorld(this.map);
     this.scene = built.scene;
+    ctx.renderHost.prepareScene(this.scene);
     this.collision = built.collision;
     this.worldUpdate = built.update;
 
@@ -130,16 +141,16 @@ export class BattleScene implements GameScene {
     this.spawnAgents(diffParams.moveSpeed);
     this.spawnPickups();
     this.scene.add(this.camera);
-    this.firstPersonGun = createFirstPersonWaterGun(this.player.skin);
+    this.firstPersonGun = createToolVisual(this.firstPersonWeapon, this.player.skin);
     this.firstPersonGun.position.set(FP_GUN_BASE.x, FP_GUN_BASE.y, FP_GUN_BASE.z);
     this.firstPersonGun.rotation.set(-0.04, 0.26, 0.02);
     this.firstPersonGun.scale.setScalar(0.62);
-    this.firstPersonGunNozzle = this.firstPersonGun.getObjectByName('first-person-water-gun-nozzle') ?? null;
+    this.firstPersonGunNozzle = this.firstPersonGun.getObjectByName('tool-nozzle') ?? null;
     this.camera.add(this.firstPersonGun);
 
-    const previewGeo = new THREE.BoxGeometry(1, 1, 1);
-    this.buildPreviewMaterial = new THREE.MeshBasicMaterial({ color: 0x80d4ff, transparent: true, opacity: 0.45 });
-    this.buildPreview = new THREE.Mesh(previewGeo, this.buildPreviewMaterial);
+    this.buildPreviewMaterial = new THREE.MeshBasicMaterial({ color: 0x80d4ff, transparent: true, opacity: 0.45, depthWrite: false });
+    this.buildOutlineMaterial = new THREE.LineBasicMaterial({ color: 0x2193a3, transparent: true, opacity: 0.8, depthWrite: false });
+    this.buildPreview = createBuildVisual(this.previewKind, this.player.skin.color, this.buildPreviewMaterial, this.buildOutlineMaterial);
     this.buildPreview.visible = false;
     this.scene.add(this.buildPreview);
 
@@ -178,6 +189,7 @@ export class BattleScene implements GameScene {
     };
     window.addEventListener('resize', this.resizeHandler);
     window.visualViewport?.addEventListener('resize', this.resizeHandler);
+    document.addEventListener('visibilitychange', this.visibilityHandler);
 
     if (!ctx.save.tutorialSeen) {
       const tutorial = this.touch
@@ -217,7 +229,12 @@ export class BattleScene implements GameScene {
       this.agents.push(bot);
       this.scene.add(bot.mesh);
     }
-    this.agents.forEach((a) => this.addAgentCollider(a));
+    this.agents.forEach((a) => {
+      this.addAgentCollider(a);
+      const shadow = contactShadow(1.4, 1.25);
+      this.scene.add(shadow);
+      this.agentShadows.set(a, shadow);
+    });
   }
 
   /**
@@ -281,7 +298,7 @@ export class BattleScene implements GameScene {
   }
 
   private loop = (): void => {
-    if (this.done) return;
+    if (this.done && this.resultTimer === null) return;
     const now = performance.now();
     const dt = Math.min(0.05, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
@@ -289,11 +306,16 @@ export class BattleScene implements GameScene {
     // 残ってしまい、「つづける」を押した直後にまたポーズしてしまう。
     const input = this.input.poll();
     if (input.pause) this.togglePause();
-    if (!this.paused) {
+    if (this.done) {
+      this.splash.update(dt);
+    } else if (!this.paused) {
       this.elapsed += dt;
       this.tick(input, dt, now);
     }
-    this.renderer.render(this.scene, this.camera);
+    if (!this.paused || this.renderDirty) {
+      this.ctx.renderHost.render(this.scene, this.camera, !this.paused);
+      this.renderDirty = false;
+    }
     this.rafId = requestAnimationFrame(this.loop);
   };
 
@@ -304,6 +326,7 @@ export class BattleScene implements GameScene {
   private setPaused(paused: boolean): void {
     if (this.done) return;
     this.paused = paused;
+    this.renderDirty = true;
     if (paused) {
       this.pauseOverlay.show();
       this.ctx.audio.playSfx('click');
@@ -355,7 +378,12 @@ export class BattleScene implements GameScene {
       }
 
       if (input.reload) {
-        this.player.cycleWeapon();
+        if (this.buildMode) {
+          this.buildKindIndex = (this.buildKindIndex + 1) % BUILD_ORDER.length;
+          this.hud.setBuildMode(true, BUILD_ORDER[this.buildKindIndex]);
+        } else {
+          this.player.cycleWeapon();
+        }
         this.ctx.audio.playSfx('click');
       }
     }
@@ -395,6 +423,7 @@ export class BattleScene implements GameScene {
       }
       a.syncMesh(this.elapsed);
       this.updateAgentCollider(a);
+      this.updateAgentShadow(a);
     }
 
     for (const a of this.agents) {
@@ -412,7 +441,7 @@ export class BattleScene implements GameScene {
     }
     for (const p of this.pickups) {
       if (!p.available && now >= p.respawnAt) setPickupAvailable(p, true, now);
-      refreshPickupRotation(p, dt);
+      if (!this.ctx.renderHost.reducedMotion) refreshPickupRotation(p, dt);
     }
 
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
@@ -537,17 +566,27 @@ export class BattleScene implements GameScene {
       return;
     }
     const kind = BUILD_ORDER[this.buildKindIndex];
+    if (kind !== this.previewKind) {
+      this.scene.remove(this.buildPreview);
+      // Preview parts share this material until the entire battle exits.
+      this.buildPreview.clear();
+      this.buildPreview = createBuildVisual(kind, this.player.skin.color, this.buildPreviewMaterial, this.buildOutlineMaterial);
+      this.scene.add(this.buildPreview);
+      this.previewKind = kind;
+    }
     const snapped = this.buildTargetPosition();
-    const { center, size } = placePieceAabb(kind, snapped, this.buildYawIndex);
+    const { center } = placePieceAabb(kind, snapped, this.buildYawIndex);
     this.buildPreview.position.copy(center);
-    this.buildPreview.scale.copy(size);
+    this.buildPreview.rotation.y = kind === 'floor' ? 0 : this.buildYawIndex * Math.PI / 2;
     const cost = BUILD_PIECES[kind].costMaterial;
     const canAfford = this.player.loadout.wood + this.player.loadout.stone >= cost;
     const blocked = this.build.isBlocked(kind, snapped, this.buildYawIndex);
     // おけるかどうかを色で伝える（みずいろ = おける／あかむらさき = おけない）
     this.buildPreviewMaterial.color.setHex(canAfford && !blocked ? 0x80d4ff : 0xff8a80);
     this.buildPreviewMaterial.opacity = canAfford && !blocked ? 0.45 : 0.3;
+    this.buildOutlineMaterial.color.setHex(canAfford && !blocked ? 0x2193a3 : 0xc05f60);
     this.buildPreview.visible = true;
+    this.hud.setBuildPlacement(canAfford && !blocked);
   }
 
   private buildTargetPosition(): THREE.Vector3 {
@@ -723,7 +762,7 @@ export class BattleScene implements GameScene {
   }
 
   private applyCameraWobble(now: number): void {
-    if (now >= this.cameraWobbleUntil) return;
+    if (this.ctx.renderHost.reducedMotion || now >= this.cameraWobbleUntil) return;
     const remaining = (this.cameraWobbleUntil - now) / Math.max(1, this.cameraWobbleUntil - this.cameraWobbleStart);
     const strength = this.cameraWobbleStrength * remaining;
     this.camera.position.x += Math.sin(now * 0.055) * strength;
@@ -741,20 +780,9 @@ export class BattleScene implements GameScene {
 
   private onEliminated(victim: Agent, attacker: Agent | null): void {
     this.ctx.audio.playSfx('eliminated');
-    // ぽよんと はじけるあわ（けがや流血の表現はしない）
-    const cloud = new THREE.Mesh(
-      new THREE.SphereGeometry(1.2, 12, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 }),
-    );
-    cloud.position.copy(victim.position);
-    cloud.position.y += 1;
-    this.scene.add(cloud);
-    this.splash.burst(cloud.position, 18, 6);
-    setTimeout(() => {
-      this.scene.remove(cloud);
-      cloud.geometry.dispose();
-      (cloud.material as THREE.Material).dispose();
-    }, 1200);
+    this.splash.cloudBurst(victim.position);
+    const shadow = this.agentShadows.get(victim);
+    if (shadow) shadow.visible = false;
     if (victim.id === PLAYER_ID) {
       this.hud.showMessage('💦 びしょぬれ！\nみんなを おうえんしよう', 2200);
     } else if (attacker?.id === PLAYER_ID) {
@@ -818,7 +846,7 @@ export class BattleScene implements GameScene {
       totalMatches: this.ctx.save.totalMatches + 1,
       totalWins: this.ctx.save.totalWins + (victory ? 1 : 0),
     });
-    setTimeout(() => {
+    this.resultTimer = setTimeout(() => {
       this.ctx.goto({ id: 'result', result });
     }, 1200);
   }
@@ -831,8 +859,11 @@ export class BattleScene implements GameScene {
   async exit(): Promise<void> {
     this.done = true;
     cancelAnimationFrame(this.rafId);
+    if (this.resultTimer !== null) clearTimeout(this.resultTimer);
+    this.resultTimer = null;
     window.removeEventListener('resize', this.resizeHandler);
     window.visualViewport?.removeEventListener('resize', this.resizeHandler);
+    document.removeEventListener('visibilitychange', this.visibilityHandler);
     this.input.detach();
     document.body.classList.remove('skb-touch-mode');
     this.hud.destroy();
@@ -850,12 +881,12 @@ export class BattleScene implements GameScene {
     disposeObject3D(this.scene);
     this.agents = [];
     this.pickups = [];
-    this.renderer.dispose();
+    this.agentShadows.clear();
   }
 
   private resizeRenderer(): void {
-    this.viewport = gameViewportSize();
-    this.renderer.setSize(this.viewport.width, this.viewport.height, false);
+    this.viewport = this.ctx.renderHost.resize();
+    this.renderDirty = true;
     if (this.camera) {
       this.camera.aspect = this.viewport.width / this.viewport.height;
       this.camera.updateProjectionMatrix();
@@ -864,15 +895,24 @@ export class BattleScene implements GameScene {
 
   private updateFirstPersonGun(now: number): void {
     if (!this.firstPersonGun) return;
+    if (this.firstPersonWeapon !== this.player.loadout.weapon) {
+      this.camera.remove(this.firstPersonGun);
+      disposeObject3D(this.firstPersonGun);
+      this.firstPersonWeapon = this.player.loadout.weapon;
+      this.firstPersonGun = createToolVisual(this.firstPersonWeapon, this.player.skin);
+      this.firstPersonGun.scale.setScalar(0.62);
+      this.firstPersonGunNozzle = this.firstPersonGun.getObjectByName('tool-nozzle') ?? null;
+      this.camera.add(this.firstPersonGun);
+    }
     // 手にみずでっぽうが常に見えていた方が「じぶんが持っている」と分かりやすい
-    this.firstPersonGun.visible = true;
+    this.firstPersonGun.visible = !this.buildMode;
     const pulse = Math.max(0, Math.min(1, (this.firstPersonGunUntil - now) / 260));
     // 撃った瞬間がいちばん強くなるようにする（sin だと反動が遅れて見える）
     const kick = pulse * (2 - pulse);
-    const moving = Math.hypot(this.player.velocity.x, this.player.velocity.z) > 0.5;
+    const moving = !this.ctx.renderHost.reducedMotion && Math.hypot(this.player.velocity.x, this.player.velocity.z) > 0.5;
     const bobPhase = this.elapsed * (moving ? 8.5 : 1.6);
-    const bobX = Math.sin(bobPhase) * (moving ? 0.016 : 0.004);
-    const bobY = Math.abs(Math.cos(bobPhase)) * (moving ? 0.014 : 0.004);
+    const bobX = this.ctx.renderHost.reducedMotion ? 0 : Math.sin(bobPhase) * (moving ? 0.016 : 0.004);
+    const bobY = this.ctx.renderHost.reducedMotion ? 0 : Math.abs(Math.cos(bobPhase)) * (moving ? 0.014 : 0.004);
 
     this.firstPersonGun.position.set(
       FP_GUN_BASE.x + bobX + kick * 0.02,
@@ -885,13 +925,23 @@ export class BattleScene implements GameScene {
       this.firstPersonGunNozzle.scale.setScalar(0.6 + kick * 1.6);
     }
   }
-}
 
-function gameViewportSize(): { width: number; height: number } {
-  const width = window.visualViewport?.width ?? window.innerWidth;
-  const height = window.visualViewport?.height ?? window.innerHeight;
-  return {
-    width: Math.max(1, Math.round(width)),
-    height: Math.max(1, Math.round(height)),
-  };
+  private updateAgentShadow(agent: Agent): void {
+    const shadow = this.agentShadows.get(agent);
+    if (!shadow) return;
+    let floor = 0;
+    for (const collider of this.collision.allColliders()) {
+      if (!collider.blocksMovement) continue;
+      const { min, max } = collider.aabb;
+      if (max.y <= agent.position.y + 0.08 &&
+          agent.position.x >= min.x && agent.position.x <= max.x &&
+          agent.position.z >= min.z && agent.position.z <= max.z) {
+        floor = Math.max(floor, max.y);
+      }
+    }
+    const distance = Math.max(0, agent.position.y - floor);
+    shadow.position.set(agent.position.x, floor + 0.026, agent.position.z);
+    shadow.scale.set(1.4 / (1 + distance * 0.2), 1.25 / (1 + distance * 0.2), 1);
+    shadow.visible = !agent.eliminated && distance < 5 && agent.id !== PLAYER_ID;
+  }
 }

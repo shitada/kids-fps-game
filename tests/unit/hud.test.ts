@@ -22,13 +22,14 @@ afterEach(() => {
 });
 
 describe('Hud wetness gauge', () => {
-  it('turns from green to orange to red as the player gets wetter', () => {
+  it('turns from aqua to amber to coral as the player gets wetter', () => {
     hud.setHp(100, 100);
-    expect(q('.skb-hp div div').style.background).toContain('rgb(52, 199, 89)');
+    expect(q('.skb-meter-fill').style.background).toBe('rgb(56, 152, 138)');
     hud.setHp(40, 100);
-    expect(q('.skb-hp div div').style.background).toContain('rgb(255, 179, 0)');
+    expect(q('.skb-meter-fill').style.background).toBe('rgb(220, 167, 57)');
     hud.setHp(10, 100);
-    expect(q('.skb-hp div div').style.background).toContain('rgb(255, 82, 82)');
+    expect(q('.skb-meter-fill').style.background).toBe('rgb(223, 121, 95)');
+    expect(q('[role="meter"]').getAttribute('aria-valuenow')).toBe('10');
   });
 
   it('shows a screen vignette only when nearly soaked', () => {
@@ -83,7 +84,7 @@ describe('Hud water recharge state', () => {
   it('tells the player the tank is refilling', () => {
     hud.setWeapon('water-gun', 0, 60, true);
     expect(q('.skb-weapon-name').textContent).toContain('みずをためてるよ');
-    expect(q('.skb-ammo').style.color).toBe('rgb(255, 209, 102)');
+    expect(q('.skb-ammo').style.color).toBe('rgb(145, 100, 20)');
   });
 
   it('goes back to the weapon name once water is available', () => {
@@ -126,6 +127,30 @@ describe('Hud pause button', () => {
     hud.onPause(spy);
     q('.skb-pause-btn').click();
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+});
+
+describe('Hud build placement', () => {
+  it('shows placement text only while building without replacing the selected piece', () => {
+    hud.setBuildPlacement(true);
+    expect(q('.skb-build-validity').textContent).toBe('');
+    hud.setBuildMode(true, 'wall');
+    hud.setBuildPlacement(true);
+    expect(q('.skb-build-validity').textContent).toBe('ここに おける');
+    expect(q('.skb-mode').textContent).toContain('かべ');
+    hud.setBuildPlacement(false);
+    expect(q('.skb-build-validity').textContent).toBe('ここには おけない');
+    expect(q('.skb-mode').textContent).toContain('かべ');
+    hud.setBuildMode(false);
+    expect(q('.skb-build-validity').style.display).toBe('none');
+    hud.setBuildPlacement(false);
+    expect(q('.skb-build-validity').style.display).toBe('none');
+    expect(q('.skb-build-validity').textContent).toBe('');
+    hud.setBuildMode(true, 'stair');
+    hud.setBuildPlacement(true);
+    expect(q('.skb-build-validity').style.display).toBe('block');
+    expect(q('.skb-mode').textContent).toContain('かいだん');
   });
 });
 
