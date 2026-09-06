@@ -4,6 +4,7 @@ export interface SceneContext {
   rootEl: HTMLElement;
   uiOverlay: HTMLElement;
   canvas: HTMLCanvasElement;
+  renderHost: import('@/game/systems/RenderHost').RenderHost;
   save: SaveData;
   saveUpdate: (patch: Partial<SaveData>) => void;
   selectMap: (mapId: string) => void;

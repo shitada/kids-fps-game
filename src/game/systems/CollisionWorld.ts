@@ -84,6 +84,10 @@ export class CollisionWorld {
     return this.colliders.filter((c) => c.blocksMovement);
   }
 
+  allColliders(): readonly Collider[] {
+    return this.colliders;
+  }
+
   projectileColliders(): Collider[] {
     return this.colliders.filter((c) => c.blocksProjectile);
   }

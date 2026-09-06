@@ -1,57 +1,63 @@
 import type { GameScene, SceneContext } from './Scene';
 import { MAPS } from '@/game/config/maps';
 import { bigButton } from './TitleScene';
+import { MenuStage } from './MenuStage';
 
 export class MapSelectScene implements GameScene {
   private el!: HTMLDivElement;
+  private stage!: MenuStage;
 
   enter(ctx: SceneContext): void {
     ctx.audio.startBgm('map-select');
     const el = document.createElement('div');
-    el.style.cssText = `position:absolute;inset:0;background:linear-gradient(180deg,#c8f7c5,#7fd1ff);display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:auto;color:#1a2540;padding:calc(18px + env(safe-area-inset-top,0px)) calc(14px + env(safe-area-inset-right,0px)) calc(18px + env(safe-area-inset-bottom,0px)) calc(14px + env(safe-area-inset-left,0px));overflow:auto;`;
-    const title = document.createElement('div');
-    title.textContent = 'どこで あそぶ？';
-    title.style.cssText = 'font-size:clamp(26px,6vw,42px);font-weight:900;margin-bottom:clamp(14px,3vw,24px);text-align:center;';
-    el.appendChild(title);
-
-    const grid = document.createElement('div');
-    grid.style.cssText = 'display:flex;gap:clamp(10px,2vw,20px);flex-wrap:wrap;justify-content:center;max-width:900px;margin-bottom:clamp(16px,3vw,32px);';
-    el.appendChild(grid);
-
-    MAPS.forEach((m) => {
+    el.className = 'park-menu map-menu';
+    el.innerHTML = `
+      <header class="menu-header"><h1>どこで あそぶ？</h1><span class="step-label">ひろばを えらんで スタート</span></header>
+      <main class="map-layout"><div class="map-grid"></div></main>
+      <footer class="menu-actions"><p>すきな ひろばを おしてね</p></footer>
+      <div class="menu-preview map-stage-preview" aria-hidden="true"></div>`;
+    el.querySelector('.menu-actions')!.prepend(bigButton('← もどる', () => {
+      ctx.audio.playSfx('click');
+      ctx.goto({ id: 'skin-select' });
+    }, true));
+    ctx.uiOverlay.appendChild(el);
+    this.el = el;
+    this.stage = new MenuStage(ctx, el.querySelector('.menu-preview')!, ctx.save.selectedSkin, 'map');
+    const grid = el.querySelector('.map-grid')!;
+    const descriptions = ['みずいろの プールと まるいパイプ', 'つみきの おしろと ふんすい', 'にじの アーチと ふわふわの くも'];
+    MAPS.forEach((map, index) => {
       const card = document.createElement('button');
-      card.style.cssText = `
-        width:clamp(132px,28vw,220px);height:clamp(126px,26vw,200px);border-radius:24px;cursor:pointer;border:none;
-        background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;
-        box-shadow:0 6px 0 #ccc;
-        font-family:'Zen Maru Gothic',sans-serif;
-      `;
-      const emoji = document.createElement('div');
-      emoji.textContent = m.emoji;
-      emoji.style.cssText = 'font-size:clamp(46px,10vw,80px);';
-      card.appendChild(emoji);
-      const name = document.createElement('div');
-      name.textContent = m.nameHiragana;
-      name.style.cssText = 'font-size:clamp(15px,3vw,22px);font-weight:700;margin-top:8px;';
-      card.appendChild(name);
+      card.type = 'button';
+      card.className = 'map-card';
+      const image = document.createElement('img');
+      image.className = 'map-thumbnail';
+      image.src = this.stage.mapThumbnail(map);
+      image.alt = '';
+      image.width = 528;
+      image.height = 320;
+      const content = document.createElement('span');
+      content.className = 'map-card-content';
+      const title = document.createElement('strong');
+      title.textContent = map.nameHiragana;
+      const description = document.createElement('span');
+      description.className = 'map-description';
+      description.textContent = descriptions[index];
+      const action = document.createElement('span');
+      action.className = 'map-card-action';
+      action.textContent = 'ここで あそぶ →';
+      content.append(title, description, action);
+      card.append(image, content);
       card.onclick = () => {
         ctx.audio.playSfx('click');
-        ctx.selectMap(m.id);
-        ctx.goto({ id: 'battle', mapId: m.id });
+        ctx.selectMap(map.id);
+        ctx.goto({ id: 'battle', mapId: map.id });
       };
       grid.appendChild(card);
     });
-
-    const back = bigButton('← もどる', () => { ctx.audio.playSfx('click'); ctx.goto({ id: 'skin-select' }); });
-    back.style.background = '#90caf9';
-    back.style.boxShadow = '0 6px 0 #1976d2';
-    el.appendChild(back);
-
-    ctx.uiOverlay.appendChild(el);
-    this.el = el;
   }
 
   exit(): void {
-    if (this.el.parentElement) this.el.parentElement.removeChild(this.el);
+    this.stage.dispose();
+    this.el.remove();
   }
 }

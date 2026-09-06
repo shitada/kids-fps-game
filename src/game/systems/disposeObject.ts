@@ -22,9 +22,20 @@ export function disposeObject3D(root: THREE.Object3D): number {
     if (obj instanceof THREE.InstancedMesh) obj.dispose();
   });
 
-  for (const g of geometries) g.dispose();
-  for (const m of materials) m.dispose();
+  let released = 0;
+  for (const g of geometries) {
+    if (!g.userData.sharedVisualResource) {
+      g.dispose();
+      released++;
+    }
+  }
+  for (const m of materials) {
+    if (!m.userData.sharedVisualResource) {
+      m.dispose();
+      released++;
+    }
+  }
 
   root.clear();
-  return geometries.size + materials.size;
+  return released;
 }

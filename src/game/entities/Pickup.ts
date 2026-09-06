@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { PickupKind, WeaponId } from '@/types';
 import { PICKUPS } from '@/game/config/pickups';
 import { WEAPON_ORDER } from '@/game/config/weapons';
+import { ellipsoid, flatMaterial, sharedGeometry, toyBox, toyMaterial } from '@/game/systems/VisualResources';
 
 export interface Pickup {
   id: string;
@@ -11,127 +12,106 @@ export interface Pickup {
   available: boolean;
   respawnAt: number;
   containedWeapon?: WeaponId;
-  /** ふわふわ動きの位相をずらすための種 */
   phase: number;
 }
 
 let pickupCounter = 0;
 
-const glowGeo = new THREE.RingGeometry(0.9, 1.25, 20);
-
-function glowRing(color: number): THREE.Mesh {
-  const mesh = new THREE.Mesh(
-    glowGeo,
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.42, side: THREE.DoubleSide, depthWrite: false }),
-  );
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.position.y = -0.62;
-  return mesh;
-}
-
-/** 遠くからでも「あれは とれるもの」と分かるよう、光る輪と目印を付ける。 */
-function meshFor(kind: PickupKind): THREE.Object3D {
+export function createPickupVisual(kind: PickupKind): THREE.Group {
   const group = new THREE.Group();
   group.name = `pickup-${kind}`;
+  const colors: Record<PickupKind, number> = {
+    'water-tank': 0x36c8dc, 'weapon-chest': 0xffce67, 'wood-node': 0xcf9368, 'stone-node': 0x98b8cc,
+  };
+  const color = colors[kind];
+  const ring = new THREE.Mesh(
+    sharedGeometry('pickup-ring', () => new THREE.TorusGeometry(0.77, 0.035, 6, 32)),
+    flatMaterial(color),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = -0.65;
+  group.add(ring);
 
-  switch (kind) {
-    case 'water-tank': {
-      const body = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.6, 0.6, 1.4, 16),
-        new THREE.MeshLambertMaterial({ color: 0x4fc3f7 }),
+  if (kind === 'water-tank') {
+    const bottle = toyBox(0.75, 1.1, 0.6, color, 0.25);
+    const cap = toyBox(0.48, 0.18, 0.4, 0xfff3d9, 0.07);
+    cap.position.y = 0.63;
+    const handle = new THREE.Mesh(
+      sharedGeometry('bottle-handle', () => new THREE.TorusGeometry(0.2, 0.065, 8, 16, Math.PI)),
+      toyMaterial(0xfff3d9),
+    );
+    handle.position.set(0, 0.68, 0);
+    const badge = ellipsoid(0.32, 0.42, 0.06, 0xf3ffff);
+    badge.position.set(0, 0.02, -0.31);
+    badge.rotation.z = -0.2;
+    const spout = toyBox(0.22, 0.22, 0.24, 0xffd367, 0.06);
+    spout.position.set(0.42, 0.38, 0);
+    group.add(bottle, cap, handle, badge, spout);
+  } else if (kind === 'weapon-chest') {
+    const base = toyBox(1.05, 0.66, 0.75, color, 0.17);
+    const lid = toyBox(1.12, 0.28, 0.82, 0xff866e, 0.13);
+    lid.position.y = 0.38;
+    const handle = new THREE.Mesh(
+      sharedGeometry('kit-handle', () => new THREE.TorusGeometry(0.2, 0.055, 8, 16, Math.PI)),
+      toyMaterial(0xfff3d9),
+    );
+    handle.position.y = 0.54;
+    const clasp = toyBox(0.19, 0.27, 0.08, 0xfff3d9, 0.04);
+    clasp.position.set(0, 0.08, -0.4);
+    group.add(base, lid, handle, clasp);
+  } else if (kind === 'wood-node') {
+    for (let i = 0; i < 3; i++) {
+      const log = new THREE.Mesh(
+        sharedGeometry('toy-log', () => new THREE.CylinderGeometry(0.19, 0.19, 0.95, 12)),
+        toyMaterial(i === 2 ? 0xdca47a : color, 0.8),
       );
-      const cap = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.28, 0.28, 0.3, 12),
-        new THREE.MeshLambertMaterial({ color: 0xfff3d6 }),
+      log.rotation.x = Math.PI / 2;
+      log.position.set(i === 2 ? 0 : i * 0.4 - 0.2, i === 2 ? 0.24 : -0.1, 0);
+      const end = new THREE.Mesh(
+        sharedGeometry('log-end', () => new THREE.CircleGeometry(0.135, 12)),
+        flatMaterial(0xffdeb0),
       );
-      cap.position.y = 0.82;
-      const band = new THREE.Mesh(
-        new THREE.TorusGeometry(0.62, 0.08, 8, 18),
-        new THREE.MeshLambertMaterial({ color: 0xe1f5fe }),
-      );
-      band.rotation.x = Math.PI / 2;
-      group.add(body, cap, band, glowRing(0x4fc3f7));
-      break;
+      end.rotation.x = -Math.PI / 2;
+      end.position.y = 0.48;
+      log.add(end);
+      group.add(log);
     }
-    case 'weapon-chest': {
-      const box = new THREE.Mesh(
-        new THREE.BoxGeometry(1.1, 0.75, 1.1),
-        new THREE.MeshLambertMaterial({ color: 0xffc107 }),
-      );
-      const lid = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.56, 0.56, 1.1, 12, 1, false, 0, Math.PI),
-        new THREE.MeshLambertMaterial({ color: 0xffa000 }),
-      );
-      lid.rotation.z = Math.PI / 2;
-      lid.position.y = 0.37;
-      const lock = new THREE.Mesh(
-        new THREE.BoxGeometry(0.24, 0.28, 0.14),
-        new THREE.MeshLambertMaterial({ color: 0xfff8e1 }),
-      );
-      lock.position.set(0, 0.05, 0.58);
-      group.add(box, lid, lock, glowRing(0xffd166));
-      break;
-    }
-    case 'wood-node': {
-      const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.32, 0.42, 1.5, 10),
-        new THREE.MeshLambertMaterial({ color: 0x8b5a2b }),
-      );
-      const leaves = new THREE.Mesh(
-        new THREE.ConeGeometry(0.85, 1.3, 8),
-        new THREE.MeshLambertMaterial({ color: 0x66bb6a }),
-      );
-      leaves.position.y = 1.05;
-      group.add(trunk, leaves, glowRing(0x8bc34a));
-      break;
-    }
-    case 'stone-node': {
-      const main = new THREE.Mesh(
-        new THREE.DodecahedronGeometry(0.7),
-        new THREE.MeshLambertMaterial({ color: 0x9e9e9e, flatShading: true }),
-      );
-      const chip = new THREE.Mesh(
-        new THREE.DodecahedronGeometry(0.34),
-        new THREE.MeshLambertMaterial({ color: 0xbdbdbd, flatShading: true }),
-      );
-      chip.position.set(0.6, -0.2, 0.3);
-      group.add(main, chip, glowRing(0xbdbdbd));
-      break;
+    const strap = toyBox(0.84, 0.64, 0.16, 0x81cbb6, 0.08);
+    group.add(strap);
+  } else {
+    const positions = [[-0.24, -0.18, 0], [0.24, -0.16, 0.1], [0, 0.18, 0]] as const;
+    for (let i = 0; i < positions.length; i++) {
+      const stone = toyBox(0.57, 0.48, 0.58, i === 1 ? 0xc5d8df : color, 0.21);
+      const position = positions[i];
+      stone.position.set(position[0], position[1], position[2]);
+      stone.rotation.y = i * 0.65;
+      group.add(stone);
     }
   }
-
   return group;
 }
 
 export function createPickup(scene: THREE.Scene, kind: PickupKind, xz: [number, number]): Pickup {
-  const mesh = meshFor(kind);
+  const mesh = createPickupVisual(kind);
   mesh.position.set(xz[0], 0.9, xz[1]);
   scene.add(mesh);
-  const pickup: Pickup = {
+  return {
     id: `pickup-${pickupCounter++}`,
-    kind,
-    mesh,
-    position: mesh.position.clone(),
-    available: true,
-    respawnAt: 0,
+    kind, mesh, position: mesh.position.clone(), available: true, respawnAt: 0,
     phase: Math.random() * Math.PI * 2,
-    containedWeapon:
-      kind === 'weapon-chest' ? (WEAPON_ORDER[1 + Math.floor(Math.random() * 2)] as WeaponId) : undefined,
+    containedWeapon: kind === 'weapon-chest' ? WEAPON_ORDER[1 + Math.floor(Math.random() * 2)] : undefined,
   };
-  return pickup;
 }
 
 export function setPickupAvailable(pickup: Pickup, available: boolean, nowMs: number): void {
   pickup.available = available;
   pickup.mesh.visible = available;
-  if (!available) {
-    pickup.respawnAt = nowMs + PICKUPS[pickup.kind].respawnMs;
-  }
+  if (!available) pickup.respawnAt = nowMs + PICKUPS[pickup.kind].respawnMs;
 }
 
 export function refreshPickupRotation(pickup: Pickup, dt: number): void {
   if (!pickup.available) return;
-  pickup.mesh.rotation.y += dt * 1.1;
+  pickup.mesh.rotation.y += dt * 0.65;
   const t = performance.now() / 1000;
-  pickup.mesh.position.y = pickup.position.y + Math.sin(t * 2.4 + pickup.phase) * 0.16;
+  pickup.mesh.position.y = pickup.position.y + Math.sin(t * 2.4 + pickup.phase) * 0.1;
 }

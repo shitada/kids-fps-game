@@ -26,7 +26,7 @@ describe('Agent', () => {
     expect(strong.speed).toBeGreaterThan(base.speed);
   });
 
-  it('syncs a richer humanoid visual without changing gameplay state', () => {
+  it('syncs a rounded mascot visual without changing gameplay state', () => {
     const a = new Agent('cpu-1', true, SKINS.usagi);
     a.position.set(1, 0, 2);
     a.velocity.set(3, 0, 4);

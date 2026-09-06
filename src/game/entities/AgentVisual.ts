@@ -1,5 +1,30 @@
 import * as THREE from 'three';
-import type { SkinConfig, SkinId } from '@/types';
+import type { SkinConfig, WeaponId } from '@/types';
+import {
+  ellipsoid, flatMaterial, roundedBox, sharedGeometry, toyBox, toyMaterial,
+} from '@/game/systems/VisualResources';
+import { createToolVisual, setToolFiring } from '@/game/entities/ToolVisual';
+
+const CREAM = 0xfff4de;
+const INK = 0x253c50;
+const CORAL = 0xf29c98;
+const WATER = 0x77d7e3;
+const FIRE_VISUAL_DURATION_SEC = 0.3;
+const HIT_VISUAL_DURATION_SEC = 0.32;
+
+interface SpringPart {
+  pivot: THREE.Group;
+  restZ: number;
+  phase: number;
+  amount: number;
+}
+
+interface WetDrop {
+  mesh: THREE.Mesh;
+  x: number;
+  y: number;
+  z: number;
+}
 
 interface AgentVisualParts {
   body: THREE.Group;
@@ -8,9 +33,12 @@ interface AgentVisualParts {
   rightArm: THREE.Group;
   leftLeg: THREE.Group;
   rightLeg: THREE.Group;
-  waterGun: THREE.Group;
-  muzzleSplash: THREE.Group;
-  wetDrops: THREE.Mesh[];
+  toolMount: THREE.Group;
+  tool: THREE.Group;
+  eyes: THREE.Group[];
+  springs: SpringPart[];
+  wetDrops: WetDrop[];
+  wetMaterial: THREE.MeshBasicMaterial;
 }
 
 export interface AgentVisualState {
@@ -21,106 +49,96 @@ export interface AgentVisualState {
   hpRatio: number;
 }
 
-interface SkinPalette {
-  face: number;
-  hair: number;
-  shirt: number;
-  shorts: number;
-  shoes: number;
-}
-
-const GEOMETRIES = {
-  torso: new THREE.CapsuleGeometry(0.28, 0.46, 4, 12),
-  head: new THREE.SphereGeometry(0.28, 18, 14),
-  neck: new THREE.CylinderGeometry(0.09, 0.1, 0.16, 12),
-  limb: new THREE.CylinderGeometry(0.075, 0.09, 0.62, 10),
-  hand: new THREE.SphereGeometry(0.09, 10, 8),
-  shoe: new THREE.BoxGeometry(0.18, 0.1, 0.28),
-  eye: new THREE.SphereGeometry(0.035, 8, 6),
-  brow: new THREE.BoxGeometry(0.1, 0.018, 0.018),
-  mouth: new THREE.BoxGeometry(0.16, 0.025, 0.018),
-  ear: new THREE.SphereGeometry(0.09, 10, 8),
-  bunnyEar: new THREE.CapsuleGeometry(0.045, 0.28, 3, 8),
-  catEar: new THREE.ConeGeometry(0.09, 0.18, 3),
-  fin: new THREE.ConeGeometry(0.09, 0.24, 4),
-  backpack: new THREE.CylinderGeometry(0.12, 0.12, 0.5, 12),
-  strap: new THREE.BoxGeometry(0.055, 0.56, 0.035),
-  tankCap: new THREE.SphereGeometry(0.13, 12, 8),
-  waterGunBody: new THREE.BoxGeometry(0.16, 0.12, 0.2),
-  waterGunTank: new THREE.SphereGeometry(0.09, 10, 8),
-  waterGunBarrel: new THREE.CylinderGeometry(0.025, 0.025, 0.36, 8),
-  waterDrop: new THREE.SphereGeometry(0.04, 8, 6),
-};
-
-const materialCache = new Map<string, THREE.Material>();
-
-/**
- * 残り時間の割合（1 = 撃った瞬間、0 = 演出おわり）を、
- * 「撃った瞬間がいちばん強く、そこから減衰する」量に変換する。
- * sin(pulse * PI) にすると撃った瞬間が 0 になり、演出が遅れて見える。
- */
-function easeOutKick(pulse: number): number {
-  return pulse * (2 - pulse);
-}
-const FIRE_VISUAL_DURATION_SEC = 0.3;
-const HIT_VISUAL_DURATION_SEC = 0.32;
-
+/** Rounded, approximately 2.5-head toys. Feet are at y=0; faces look down -Z. */
 export class AgentVisual {
   readonly root: THREE.Group;
-  private parts: AgentVisualParts;
+  private readonly parts: AgentVisualParts;
+  private readonly skin: SkinConfig;
+  private readonly tools = new Map<WeaponId, THREE.Group>();
+  private weapon: WeaponId = 'water-gun';
   private firePulseUntilSec = 0;
   private hitPulseUntilSec = 0;
 
   constructor(skin: SkinConfig) {
+    this.skin = skin;
     this.root = new THREE.Group();
     this.root.name = `agent-visual-${skin.id}`;
     this.root.userData.kind = 'agent-visual';
+    this.root.userData.skin = skin.id;
     this.parts = buildParts(this.root, skin);
+    this.tools.set('water-gun', this.parts.tool);
+  }
+
+  /** Called before update by Agent. Only a weapon change builds/swaps a toy. */
+  setWeapon(weapon: WeaponId): void {
+    if (this.weapon === weapon) return;
+    setToolFiring(this.parts.tool, 0);
+    this.parts.toolMount.remove(this.parts.tool);
+    let tool = this.tools.get(weapon);
+    if (!tool) {
+      tool = createToolVisual(weapon, this.skin);
+      this.tools.set(weapon, tool);
+    }
+    this.parts.tool = tool;
+    this.parts.toolMount.add(tool);
+    this.weapon = weapon;
   }
 
   update(state: AgentVisualState): void {
-    const speedRatio = THREE.MathUtils.clamp(state.moveSpeed / 7.5, 0, 1.4);
-    const moving = state.onGround && speedRatio > 0.05;
-    const walkPhase = state.elapsedSec * (5.5 + speedRatio * 4);
-    const swing = moving ? Math.sin(walkPhase) * speedRatio : 0;
-    const bob = moving ? Math.abs(Math.sin(walkPhase)) * 0.035 * speedRatio : Math.sin(state.elapsedSec * 2.2) * 0.01;
-
+    const speed = THREE.MathUtils.clamp(state.moveSpeed / 7.5, 0, 1.4);
+    const moving = state.onGround && speed > 0.05;
+    const phase = state.elapsedSec * (6 + speed * 4);
+    const swing = moving ? Math.sin(phase) * speed : 0;
+    const breath = Math.sin(state.elapsedSec * 2.2);
+    const bob = moving ? Math.abs(Math.sin(phase)) * 0.035 * speed : (breath + 1) * 0.006;
     const firePulse = THREE.MathUtils.clamp((this.firePulseUntilSec - state.elapsedSec) / FIRE_VISUAL_DURATION_SEC, 0, 1);
-    const fireKick = easeOutKick(firePulse);
+    const fireKick = firePulse * (2 - firePulse);
     const hitPulse = THREE.MathUtils.clamp((this.hitPulseUntilSec - state.elapsedSec) / HIT_VISUAL_DURATION_SEC, 0, 1);
-    const hitKick = easeOutKick(hitPulse);
+    const hitKick = hitPulse * (2 - hitPulse);
+    const airborne = state.onGround ? 0 : 1;
+    const squash = hitKick * 0.065;
 
-    this.parts.body.position.y = bob + hitKick * 0.07;
-    this.parts.body.rotation.x = -fireKick * 0.05 + hitKick * 0.08;
-    this.parts.body.rotation.z = moving ? Math.sin(walkPhase) * 0.035 : Math.sin(state.elapsedSec * 1.4) * 0.015;
+    this.parts.body.position.y = bob + hitKick * 0.035;
+    this.parts.body.scale.set(1 + squash * 0.5, 1 - squash, 1 + squash * 0.5);
+    this.parts.body.rotation.x = -fireKick * 0.035 + hitKick * 0.045;
+    this.parts.body.rotation.z = swing * 0.025 + breath * 0.009;
+    this.parts.leftLeg.rotation.x = swing * 0.5 - airborne * 0.18;
+    this.parts.rightLeg.rotation.x = -swing * 0.5 + airborne * 0.18;
+    // Lift only the travelling foot, keeping the short, rounded soles above y=0.
+    this.parts.leftLeg.position.y = 0.34 + Math.max(0, swing) * 0.035;
+    this.parts.rightLeg.position.y = 0.34 + Math.max(0, -swing) * 0.035;
 
-    this.parts.leftLeg.rotation.x = swing * 0.48;
-    this.parts.rightLeg.rotation.x = -swing * 0.48;
+    this.parts.leftArm.rotation.x = 0.25 + swing * 0.3 - airborne * 0.3 + hitKick * 0.2;
+    this.parts.leftArm.rotation.z = 0.15 + airborne * 0.3 + hitKick * 0.1;
+    this.parts.rightArm.rotation.x = 0.95 - state.aimPitch * 0.2 - fireKick * 0.16;
+    this.parts.rightArm.rotation.z = -0.08 - hitKick * 0.1;
+    // Cancel the holding pose so every tool's outlet really points forward.
+    this.parts.toolMount.rotation.x = -this.parts.rightArm.rotation.x + THREE.MathUtils.clamp(state.aimPitch, -0.7, 0.7);
+    this.parts.tool.position.z = fireKick * 0.035;
+    this.parts.tool.scale.setScalar(1 + fireKick * 0.06);
+    setToolFiring(this.parts.tool, fireKick);
 
-    const aimRaise = 0.72 - THREE.MathUtils.clamp(state.aimPitch, -0.55, 0.55) * 0.35;
-    this.parts.leftArm.position.z = -0.01 - fireKick * 0.05 + hitKick * 0.03;
-    this.parts.leftArm.rotation.x = aimRaise + swing * 0.16 - fireKick * 0.16 + hitKick * 0.18;
-    this.parts.rightArm.position.z = -0.01 - fireKick * 0.08;
-    this.parts.rightArm.rotation.x = aimRaise - swing * 0.12 - fireKick * 0.42 + hitKick * 0.1;
-    this.parts.leftArm.rotation.z = 0.18 - fireKick * 0.14 + hitKick * 0.08;
-    this.parts.rightArm.rotation.z = -0.18 - fireKick * 0.08 - hitKick * 0.12;
-    this.parts.waterGun.position.z = -0.15 - fireKick * 0.05;
-    this.parts.waterGun.scale.setScalar(1 + fireKick * 0.1);
-    this.parts.muzzleSplash.visible = fireKick > 0.05;
-    this.parts.muzzleSplash.scale.setScalar(0.7 + fireKick * 1.1);
+    this.parts.head.rotation.x = THREE.MathUtils.clamp(-state.aimPitch * 0.22 - hitKick * 0.07, -0.2, 0.2);
+    this.parts.head.rotation.y = Math.sin(state.elapsedSec * 1.15) * 0.025 + hitKick * 0.07;
+    this.parts.head.rotation.z = -swing * 0.022;
+    // A brief blink every few seconds; no timers, textures or material mutation.
+    const blinkPhase = state.elapsedSec % 4.6;
+    const blink = blinkPhase > 4.42 ? 0.16 + Math.abs(blinkPhase - 4.51) / 0.09 * 0.84 : 1;
+    for (const eye of this.parts.eyes) eye.scale.y = blink;
+    for (const spring of this.parts.springs) {
+      spring.pivot.rotation.z = spring.restZ
+        + Math.sin(state.elapsedSec * 3 + spring.phase) * spring.amount * 0.35
+        + swing * spring.amount + hitKick * spring.amount * 1.8;
+      spring.pivot.rotation.x = Math.sin(phase - 0.7 + spring.phase) * (moving ? 0.06 : 0.018) + fireKick * 0.06;
+    }
 
-    this.parts.head.rotation.x = THREE.MathUtils.clamp(-state.aimPitch * 0.25 - hitKick * 0.08, -0.2, 0.2);
-    this.parts.head.rotation.y = (moving ? Math.sin(walkPhase * 0.5) * 0.04 : Math.sin(state.elapsedSec * 1.1) * 0.025) + hitKick * 0.08;
-
-    const wetOpacity = THREE.MathUtils.clamp((1 - state.hpRatio) * 1.4 + hitKick * 0.45, 0, 0.9);
+    const wet = THREE.MathUtils.clamp((1 - state.hpRatio) * 1.4 + hitKick * 0.45, 0, 0.9);
+    // This material belongs to this one mascot, never the global material cache.
+    this.parts.wetMaterial.opacity = wet;
     for (const drop of this.parts.wetDrops) {
-      drop.visible = wetOpacity > 0.05;
-      const mat = drop.material;
-      if (mat instanceof THREE.MeshBasicMaterial) mat.opacity = wetOpacity;
-      const baseScale = drop.userData.baseScale;
-      if (baseScale instanceof THREE.Vector3) {
-        drop.scale.set(baseScale.x * (1 + hitKick * 0.35), baseScale.y * (1 + hitKick * 0.35), baseScale.z * (1 + hitKick * 0.35));
-      }
+      drop.mesh.visible = wet > 0.05;
+      const swell = 1 + hitKick * 0.35;
+      drop.mesh.scale.set(drop.x * swell, drop.y * swell, drop.z * swell);
     }
   }
 
@@ -137,343 +155,392 @@ export function buildAgentMesh(skin: SkinConfig): THREE.Group {
   return new AgentVisual(skin).root;
 }
 
-function buildParts(root: THREE.Group, skin: SkinConfig): AgentVisualParts {
-  const palette = paletteFor(skin);
-  const body = new THREE.Group();
-  root.add(body);
-
-  const torso = mesh(GEOMETRIES.torso, lambert(palette.shirt));
-  torso.position.y = 0.92;
-  torso.scale.set(1.05, 1, 0.82);
-  body.add(torso);
-
-  const shorts = mesh(new THREE.BoxGeometry(0.52, 0.22, 0.36), lambert(palette.shorts));
-  shorts.position.y = 0.48;
-  body.add(shorts);
-
-  const neck = mesh(GEOMETRIES.neck, lambert(palette.face));
-  neck.position.y = 1.38;
-  body.add(neck);
-
-  const head = new THREE.Group();
-  head.position.y = 1.58;
-  body.add(head);
-
-  const face = mesh(GEOMETRIES.head, lambert(palette.face));
-  face.scale.set(1, 1.05, 0.95);
-  head.add(face);
-
-  addFace(head);
-  addHairAndAccessory(head, skin, palette);
-  addWaterPack(body, skin);
-
-  const leftArm = makeArm(-1, palette);
-  const rightArm = makeArm(1, palette);
-  leftArm.position.set(-0.36, 1.16, -0.01);
-  rightArm.position.set(0.36, 1.16, -0.01);
-  body.add(leftArm, rightArm);
-  const { waterGun, muzzleSplash } = addWaterGun(rightArm, skin);
-
-  const leftLeg = makeLeg(-1, palette);
-  const rightLeg = makeLeg(1, palette);
-  leftLeg.position.set(-0.16, 0.48, 0);
-  rightLeg.position.set(0.16, 0.48, 0);
-  body.add(leftLeg, rightLeg);
-
-  const wetDrops = addWetDrops(torso);
-
-  return { body, head, leftArm, rightArm, leftLeg, rightLeg, waterGun, muzzleSplash, wetDrops };
+/**
+ * Compatibility for callers predating ToolVisual. The old flash name is an
+ * alias wrapper; new code should use createToolVisual / `tool-nozzle`.
+ */
+export function createFirstPersonWaterGun(skin: SkinConfig): THREE.Group {
+  const gun = createToolVisual('water-gun', skin);
+  gun.name = 'first-person-water-gun';
+  gun.visible = false;
+  const nozzle = gun.getObjectByName('tool-nozzle');
+  if (nozzle) {
+    const alias = new THREE.Group();
+    alias.name = 'first-person-water-gun-nozzle';
+    alias.position.copy(nozzle.position);
+    alias.visible = false;
+    gun.add(alias);
+    alias.add(nozzle);
+    nozzle.position.set(0, 0, 0);
+    nozzle.visible = true;
+  }
+  return gun;
 }
 
-function makeArm(side: -1 | 1, palette: SkinPalette): THREE.Group {
-  const arm = new THREE.Group();
-  arm.rotation.z = side * -0.18;
+function buildParts(root: THREE.Group, skin: SkinConfig): AgentVisualParts {
+  const body = group('mascot-body', root);
+  const robot = skin.id === 'robo';
+  const rabbit = skin.id === 'usagi';
+  const fish = skin.id === 'sakana';
+  const torso = robot
+    ? toyBox(0.65, 0.76, 0.51, skin.color, 0.18)
+    : ellipsoid(rabbit ? 0.62 : 0.76, 0.88, fish ? 0.56 : 0.59, skin.color);
+  torso.name = 'mascot-torso';
+  torso.position.y = 0.77;
+  body.add(torso);
+  const belly = robot
+    ? toyBox(0.4, 0.37, 0.07, CREAM, 0.1)
+    : ellipsoid(rabbit ? 0.38 : 0.49, 0.5, 0.075, skin.accent);
+  belly.name = robot ? 'robot-belly-panel' : 'mascot-belly';
+  belly.position.set(0, 0.71, -0.272);
+  body.add(belly);
+  if (robot) addRobotButtons(body);
 
-  const sleeve = mesh(GEOMETRIES.limb, lambert(palette.shirt));
-  sleeve.position.y = -0.28;
-  arm.add(sleeve);
+  const head = group('mascot-head', body);
+  head.position.y = 1.35;
+  const shell = robot
+    ? toyBox(0.82, 0.66, 0.64, skin.color, 0.2)
+    : ellipsoid(fish ? 0.94 : rabbit ? 0.8 : 0.88, 0.7, fish ? 0.7 : 0.66, skin.color);
+  shell.name = `${skin.id}-head-shell`;
+  head.add(shell);
+  const eyes = addFace(head, skin);
+  const springs: SpringPart[] = [];
+  addSpeciesSilhouette(body, head, skin, springs);
+  addWaterPack(body, skin);
 
-  const hand = mesh(GEOMETRIES.hand, lambert(palette.face));
-  hand.position.y = -0.63;
+  const leftArm = makeArm(body, -1, skin);
+  const rightArm = makeArm(body, 1, skin);
+  const leftLeg = makeLeg(body, -1, skin);
+  const rightLeg = makeLeg(body, 1, skin);
+  const toolMount = group('mascot-tool-mount', rightArm);
+  toolMount.position.set(0, -0.29, -0.035);
+  toolMount.rotation.x = -0.95;
+  toolMount.scale.setScalar(0.78);
+  const tool = createToolVisual('water-gun', skin);
+  toolMount.add(tool);
+
+  const wetMaterial = new THREE.MeshBasicMaterial({
+    color: 0x3fbded, transparent: true, opacity: 0, depthWrite: false,
+  });
+  const wetDrops = addWetDrops(body, head, wetMaterial, robot ? -0.395 : fish ? -0.239 : -0.218);
+  return {
+    body, head, leftArm, rightArm, leftLeg, rightLeg, toolMount, tool, eyes, springs, wetDrops, wetMaterial,
+  };
+}
+
+function makeArm(body: THREE.Group, side: -1 | 1, skin: SkinConfig): THREE.Group {
+  const arm = group(side === -1 ? 'mascot-arm-left' : 'mascot-arm-right', body);
+  arm.position.set(side * (skin.id === 'usagi' ? 0.33 : 0.39), 1.02, -0.015);
+  arm.rotation.set(side === 1 ? 0.95 : 0.25, 0, side === 1 ? -0.08 : 0.15);
+  const limb = ellipsoid(0.19, 0.3, 0.21, skin.color);
+  limb.position.y = -0.13;
+  arm.add(limb);
+  const hand = ellipsoid(0.22, 0.19, 0.23, skin.id === 'robo' ? skin.accent : skin.color);
+  hand.name = 'mascot-mitten';
+  hand.position.set(0, -0.285, -0.025);
   arm.add(hand);
-
+  if (skin.id === 'robo') {
+    const joint = ellipsoid(0.21, 0.21, 0.22, CREAM);
+    arm.add(joint);
+  }
   return arm;
 }
 
-function makeLeg(side: -1 | 1, palette: SkinPalette): THREE.Group {
-  const leg = new THREE.Group();
-
-  const limb = mesh(GEOMETRIES.limb, lambert(palette.shorts));
-  limb.position.y = -0.28;
+function makeLeg(body: THREE.Group, side: -1 | 1, skin: SkinConfig): THREE.Group {
+  const leg = group(side === -1 ? 'mascot-leg-left' : 'mascot-leg-right', body);
+  leg.position.set(side * 0.19, 0.34, 0);
+  const limb = ellipsoid(0.22, 0.32, 0.24, skin.color);
+  limb.position.y = -0.09;
   leg.add(limb);
-
-  const shoe = mesh(GEOMETRIES.shoe, lambert(palette.shoes));
-  shoe.position.set(side * 0.015, -0.62, -0.07);
-  leg.add(shoe);
-
+  const foot = skin.id === 'robo'
+    ? toyBox(0.29, 0.18, 0.37, skin.accent, 0.07)
+    : ellipsoid(skin.id === 'usagi' ? 0.24 : 0.29, 0.2, skin.id === 'usagi' ? 0.4 : 0.37, skin.color);
+  foot.name = 'mascot-foot';
+  foot.position.set(0, skin.id === 'robo' ? -0.25 : -0.24, -0.075);
+  leg.add(foot);
   return leg;
 }
 
-function addFace(head: THREE.Group): void {
-  const eyeMat = basic(0x111827);
-  const browMat = basic(0x4a2c21);
-  const mouthMat = basic(0x7a2f3a);
-
-  const eyeL = mesh(GEOMETRIES.eye, eyeMat);
-  eyeL.position.set(-0.095, 0.04, -0.255);
-  const eyeR = mesh(GEOMETRIES.eye, eyeMat);
-  eyeR.position.set(0.095, 0.04, -0.255);
-
-  const browL = mesh(GEOMETRIES.brow, browMat);
-  browL.position.set(-0.095, 0.12, -0.245);
-  browL.rotation.z = 0.15;
-  const browR = mesh(GEOMETRIES.brow, browMat);
-  browR.position.set(0.095, 0.12, -0.245);
-  browR.rotation.z = -0.15;
-
-  const mouth = mesh(GEOMETRIES.mouth, mouthMat);
-  mouth.position.set(0, -0.1, -0.26);
-
-  head.add(eyeL, eyeR, browL, browR, mouth);
+function addFace(head: THREE.Group, skin: SkinConfig): THREE.Group[] {
+  const robot = skin.id === 'robo';
+  const fish = skin.id === 'sakana';
+  if (robot) {
+    const surround = toyBox(0.72, 0.45, 0.08, CREAM, 0.13);
+    surround.name = 'robot-face-surround';
+    surround.position.set(0, 0.005, -0.301);
+    head.add(surround);
+    const panel = new THREE.Mesh(roundedBox(0.64, 0.37, 0.07, 0.11), flatMaterial(INK));
+    panel.name = 'robot-face-panel';
+    panel.position.set(0, 0.005, -0.34);
+    head.add(panel);
+  } else {
+    const muzzle = ellipsoid(fish ? 0.3 : skin.id === 'kuma' ? 0.43 : 0.37, fish ? 0.18 : 0.235, 0.15, CREAM);
+    muzzle.name = 'mascot-muzzle';
+    muzzle.position.set(0, -0.12, fish ? -0.337 : -0.31);
+    head.add(muzzle);
+    if (!fish) {
+      const nose = ellipsoid(skin.id === 'usagi' ? 0.075 : 0.11, 0.067, 0.055, skin.id === 'usagi' ? 0xd37d94 : INK);
+      nose.name = 'mascot-nose';
+      nose.position.set(0, -0.065, -0.395);
+      head.add(nose);
+    }
+  }
+  const eyes: THREE.Group[] = [];
+  for (const side of [-1, 1]) {
+    const eye = group(side === -1 ? 'mascot-eye-left' : 'mascot-eye-right', head);
+    eye.position.set(side * (fish ? 0.205 : 0.17), 0.055, robot ? -0.387 : -0.302);
+    const pupil = ellipsoid(robot ? 0.085 : 0.078, robot ? 0.115 : 0.108, 0.042, INK);
+    pupil.material = flatMaterial(robot ? 0x9df2e6 : INK);
+    eye.add(pupil);
+    const catchlight = ellipsoid(0.026, 0.032, 0.012, 0xffffff);
+    catchlight.name = 'eye-catchlight';
+    catchlight.material = flatMaterial(0xffffff);
+    catchlight.position.set(-0.014, 0.027, -0.024);
+    eye.add(catchlight);
+    eyes.push(eye);
+    const cheek = ellipsoid(0.105, 0.06, 0.032, robot ? 0x78bccc : CORAL);
+    cheek.name = 'mascot-cheek';
+    cheek.position.set(side * 0.275, -0.073, robot ? -0.378 : -0.275);
+    head.add(cheek);
+  }
+  const smile = new THREE.Mesh(sharedGeometry('mascot-gentle-smile', () => {
+    const path = new THREE.QuadraticBezierCurve3(
+      new THREE.Vector3(-0.07, 0.025, 0),
+      new THREE.Vector3(0, -0.055, -0.008),
+      new THREE.Vector3(0.07, 0.025, 0),
+    );
+    return new THREE.TubeGeometry(path, 12, 0.011, 5, false);
+  }), flatMaterial(robot ? 0x9df2e6 : INK));
+  smile.name = 'mascot-smile';
+  smile.position.set(0, -0.15, robot ? -0.387 : fish ? -0.42 : -0.391);
+  head.add(smile);
+  return eyes;
 }
 
-function addHairAndAccessory(head: THREE.Group, skin: SkinConfig, palette: SkinPalette): void {
-  const hair = mesh(new THREE.SphereGeometry(0.286, 18, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), lambert(palette.hair));
-  hair.position.y = 0.045;
-  hair.rotation.x = -0.1;
-  head.add(hair);
-
+function addSpeciesSilhouette(
+  body: THREE.Group, head: THREE.Group, skin: SkinConfig, springs: SpringPart[],
+): void {
   switch (skin.id) {
     case 'kuma':
-      addRoundEars(head, skin.color, 0.18);
+      for (const side of [-1, 1]) {
+        const ear = springGroup(head, `bear-ear-${side < 0 ? 'left' : 'right'}`, side * 0.32, 0.265, 0, side * -0.13, 0.06, springs);
+        ear.add(ellipsoid(0.27, 0.28, 0.18, skin.color));
+        const inset = ellipsoid(0.15, 0.16, 0.035, skin.accent);
+        inset.position.z = -0.086;
+        ear.add(inset);
+      }
+      addRoundTail(body, 'bear-button-tail', skin.color, 0.22, springs);
       break;
     case 'usagi':
-      addBunnyEars(head, skin.color);
+      for (const side of [-1, 1]) {
+        const ear = springGroup(head, `rabbit-ear-${side < 0 ? 'left' : 'right'}`, side * 0.19, 0.24, 0.035, side * -0.16, 0.18, springs);
+        const shell = new THREE.Mesh(rabbitEarGeometry(), toyMaterial(skin.color));
+        shell.name = 'rabbit-soft-ear';
+        ear.add(shell);
+        const inset = ellipsoid(0.085, 0.37, 0.04, CORAL);
+        inset.position.set(0.013, 0.265, -0.073);
+        inset.rotation.z = -0.07;
+        ear.add(inset);
+      }
+      addRoundTail(body, 'rabbit-pom-tail', CREAM, 0.28, springs);
       break;
     case 'neko':
-      addCatEars(head, skin.color);
+      for (const side of [-1, 1]) {
+        const ear = springGroup(head, `cat-ear-${side < 0 ? 'left' : 'right'}`, side * 0.28, 0.235, 0.015, side * -0.22, 0.055, springs);
+        const shell = new THREE.Mesh(catEarGeometry(), toyMaterial(skin.color));
+        ear.add(shell);
+        const inset = new THREE.Mesh(catEarGeometry(), toyMaterial(CORAL));
+        inset.scale.set(0.55, 0.58, 0.28);
+        inset.position.set(0, 0.045, -0.075);
+        ear.add(inset);
+      }
+      {
+        const tail = springGroup(body, 'cat-curled-tail', 0.18, 0.48, 0.22, 0, 0.16, springs);
+        const mesh = new THREE.Mesh(sharedGeometry('mascot-cat-curled-tail', () => {
+          const curve = new THREE.CatmullRomCurve3([
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(0.2, 0.03, 0.15),
+            new THREE.Vector3(0.36, 0.23, 0.17),
+            new THREE.Vector3(0.31, 0.4, 0.14),
+            new THREE.Vector3(0.2, 0.42, 0.12),
+          ]);
+          return new THREE.TubeGeometry(curve, 18, 0.065, 8, false);
+        }), toyMaterial(skin.color));
+        tail.add(mesh);
+        const tip = ellipsoid(0.135, 0.135, 0.135, skin.accent);
+        tip.position.set(0.2, 0.42, 0.12);
+        tail.add(tip);
+      }
       break;
     case 'robo':
-      addRoboVisor(head, skin.accent);
+      {
+        const antenna = springGroup(head, 'robot-spring-antenna', 0.17, 0.31, 0.025, -0.1, 0.15, springs);
+        const stem = toyBox(0.052, 0.16, 0.052, CREAM, 0.02);
+        stem.position.y = 0.06;
+        antenna.add(stem);
+        const orb = ellipsoid(0.13, 0.13, 0.13, skin.accent);
+        orb.position.y = 0.16;
+        antenna.add(orb);
+      }
+      for (const side of [-1, 1]) {
+        const pod = ellipsoid(0.15, 0.24, 0.24, skin.accent);
+        pod.name = `robot-ear-pod-${side}`;
+        pod.position.set(side * 0.42, 0, 0);
+        head.add(pod);
+      }
       break;
     case 'sakana':
-      addFishFin(head, skin.accent);
+      {
+        const crest = springGroup(head, 'fish-dorsal-fin', 0, 0.28, 0.04, 0, 0.12, springs);
+        const fin = new THREE.Mesh(finGeometry(), toyMaterial(skin.accent));
+        fin.rotation.y = Math.PI / 2;
+        crest.add(fin);
+      }
+      for (const side of [-1, 1]) {
+        const fin = springGroup(head, `fish-side-fin-${side < 0 ? 'left' : 'right'}`, side * 0.4, -0.07, 0.055, side * -0.9, 0.13, springs);
+        fin.add(new THREE.Mesh(finGeometry(), toyMaterial(skin.accent)));
+      }
+      {
+        const tail = springGroup(body, 'fish-fan-tail', 0, 0.51, 0.27, 0, 0.18, springs);
+        tail.rotation.y = -Math.PI / 2;
+        for (const side of [-1, 1]) {
+          const lobe = ellipsoid(0.37, 0.21, 0.09, skin.accent);
+          lobe.position.set(0.2, side * 0.08, 0);
+          lobe.rotation.z = side * 0.4;
+          tail.add(lobe);
+        }
+      }
       break;
   }
-}
-
-function addRoundEars(head: THREE.Group, color: number, y: number): void {
-  const mat = lambert(color);
-  for (const side of [-1, 1] as const) {
-    const ear = mesh(GEOMETRIES.ear, mat);
-    ear.position.set(side * 0.2, y, 0.02);
-    head.add(ear);
-  }
-}
-
-function addBunnyEars(head: THREE.Group, color: number): void {
-  const mat = lambert(color);
-  for (const side of [-1, 1] as const) {
-    const ear = mesh(GEOMETRIES.bunnyEar, mat);
-    ear.position.set(side * 0.13, 0.36, 0.02);
-    ear.rotation.z = side * -0.18;
-    head.add(ear);
-  }
-}
-
-function addCatEars(head: THREE.Group, color: number): void {
-  const mat = lambert(color);
-  for (const side of [-1, 1] as const) {
-    const ear = mesh(GEOMETRIES.catEar, mat);
-    ear.position.set(side * 0.17, 0.26, 0.02);
-    ear.rotation.z = side * -0.28;
-    head.add(ear);
-  }
-}
-
-function addRoboVisor(head: THREE.Group, accent: number): void {
-  const visor = mesh(new THREE.BoxGeometry(0.36, 0.09, 0.035), basic(accent));
-  visor.position.set(0, 0.02, -0.27);
-  head.add(visor);
-}
-
-function addFishFin(head: THREE.Group, accent: number): void {
-  const fin = mesh(GEOMETRIES.fin, lambert(accent));
-  fin.position.set(0, 0.28, 0.02);
-  fin.rotation.x = Math.PI * 0.5;
-  head.add(fin);
 }
 
 function addWaterPack(body: THREE.Group, skin: SkinConfig): void {
-  const pack = mesh(GEOMETRIES.backpack, lambert(0x6ec6ff));
-  pack.position.set(0, 0.94, 0.31);
-  pack.rotation.x = Math.PI * 0.5;
-  body.add(pack);
-
-  const cap = mesh(GEOMETRIES.tankCap, basic(0xc9efff, 0.7));
-  cap.position.set(0, 0.94, 0.31);
-  cap.scale.set(0.75, 0.75, 1.2);
-  body.add(cap);
-
-  const strapMat = lambert(skin.accent);
-  for (const side of [-1, 1] as const) {
-    const strap = mesh(GEOMETRIES.strap, strapMat);
-    strap.position.set(side * 0.16, 0.94, 0.12);
+  const pack = group('mascot-water-pack', body);
+  pack.position.set(0, 0.85, 0.32);
+  const tank = ellipsoid(0.45, 0.59, 0.35, WATER);
+  tank.name = 'mascot-water-tank';
+  pack.add(tank);
+  const base = toyBox(0.4, 0.12, 0.3, skin.accent, 0.05);
+  base.position.y = -0.22;
+  pack.add(base);
+  const cap = toyBox(0.16, 0.08, 0.15, CREAM, 0.025);
+  cap.position.y = 0.3;
+  pack.add(cap);
+  const window = ellipsoid(0.2, 0.3, 0.045, 0xcaf5f2);
+  window.name = 'tank-water-window';
+  window.position.set(0, 0.015, 0.175);
+  pack.add(window);
+  for (const side of [-1, 1]) {
+    const strap = new THREE.Mesh(sharedGeometry('mascot-tank-strap', () => {
+      const curve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(0, 0.5, -0.21),
+        new THREE.Vector3(0, 0.81, -0.28),
+        new THREE.Vector3(0, 1.095, -0.14),
+        new THREE.Vector3(0, 1.13, 0.1),
+        new THREE.Vector3(0, 0.92, 0.29),
+      ]);
+      return new THREE.TubeGeometry(curve, 14, 0.032, 6, false);
+    }), toyMaterial(skin.id === 'neko' ? skin.accent : 0x4b9ba7));
+    strap.name = side < 0 ? 'tank-strap-left' : 'tank-strap-right';
+    strap.position.x = side * 0.225;
     body.add(strap);
   }
 }
 
-function addWaterGun(rightArm: THREE.Group, skin: SkinConfig): { waterGun: THREE.Group; muzzleSplash: THREE.Group } {
-  const gun = new THREE.Group();
-  gun.position.set(0.02, -0.62, -0.15);
-  gun.rotation.x = Math.PI * 0.5;
-  rightArm.add(gun);
-
-  const body = mesh(GEOMETRIES.waterGunBody, lambert(skin.accent));
-  const tank = mesh(GEOMETRIES.waterGunTank, basic(0x9fe8ff, 0.78));
-  tank.position.set(0, 0.08, 0);
-
-  const barrel = mesh(GEOMETRIES.waterGunBarrel, basic(0x4fc3f7));
-  barrel.position.y = -0.24;
-
-  const muzzleSplash = makeMuzzleSplash();
-  muzzleSplash.position.y = -0.48;
-  muzzleSplash.visible = false;
-
-  gun.add(body, tank, barrel, muzzleSplash);
-  return { waterGun: gun, muzzleSplash };
-}
-
-function makeMuzzleSplash(): THREE.Group {
-  const splash = new THREE.Group();
-  splash.userData.kind = 'muzzle-splash';
-
-  const center = mesh(new THREE.SphereGeometry(0.085, 8, 6), basic(0xe9fbff, 0.9));
-  splash.add(center);
-
-  const dropMat = basic(0x9fe8ff, 0.82);
-  const offsets: Array<[number, number, number, number]> = [
-    [-0.08, -0.03, 0.02, 0.55],
-    [0.08, -0.04, -0.01, 0.5],
-    [0, -0.1, 0.04, 0.45],
-  ];
-  for (const [x, y, z, scale] of offsets) {
-    const drop = mesh(GEOMETRIES.waterDrop, dropMat);
-    drop.position.set(x, y, z);
-    drop.scale.setScalar(scale);
-    splash.add(drop);
+function addRobotButtons(body: THREE.Group): void {
+  for (let i = 0; i < 3; i++) {
+    const button = ellipsoid(0.075, 0.075, 0.035, [0x7edcc7, 0xffbd71, CORAL][i]);
+    button.name = `robot-belly-button-${i}`;
+    button.position.set((i - 1) * 0.105, 0.69, -0.316);
+    body.add(button);
   }
-
-  return splash;
 }
 
-export function createFirstPersonWaterGun(skin: SkinConfig): THREE.Group {
-  const gun = new THREE.Group();
-  gun.name = 'first-person-water-gun';
-  gun.visible = false;
-
-  // 一人称で見たときに「みずでっぽうを持っている」と分かる形にする。
-  // 画面を占領しないよう、本体は小さめでノズルだけ前に出す。
-  const body = mesh(new THREE.BoxGeometry(0.15, 0.13, 0.3), lambert(skin.accent));
-  body.position.set(0, 0, -0.02);
-  gun.add(body);
-
-  const grip = mesh(new THREE.BoxGeometry(0.08, 0.2, 0.1), lambert(skin.color));
-  grip.position.set(0, -0.15, 0.07);
-  grip.rotation.x = -0.22;
-  gun.add(grip);
-
-  const trigger = mesh(new THREE.BoxGeometry(0.03, 0.06, 0.03), basic(0xffffff, 0.9));
-  trigger.position.set(0, -0.07, 0.01);
-  gun.add(trigger);
-
-  const tank = mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.2, 12), basic(0x9fe8ff, 0.85));
-  tank.rotation.x = Math.PI * 0.5;
-  tank.position.set(0, 0.1, 0.02);
-  gun.add(tank);
-
-  const tankCap = mesh(new THREE.SphereGeometry(0.055, 10, 8), basic(0xe9fbff, 0.9));
-  tankCap.position.set(0, 0.1, -0.09);
-  gun.add(tankCap);
-
-  const barrel = mesh(new THREE.CylinderGeometry(0.028, 0.032, 0.34, 10), basic(0x4fc3f7));
-  barrel.rotation.x = Math.PI * 0.5;
-  barrel.position.set(0, 0.012, -0.32);
-  gun.add(barrel);
-
-  const muzzle = mesh(new THREE.CylinderGeometry(0.045, 0.036, 0.06, 10), lambert(skin.accent));
-  muzzle.rotation.x = Math.PI * 0.5;
-  muzzle.position.set(0, 0.012, -0.5);
-  gun.add(muzzle);
-
-  const nozzle = mesh(new THREE.SphereGeometry(0.05, 10, 8), basic(0xd9f6ff, 0.85));
-  nozzle.name = 'first-person-water-gun-nozzle';
-  nozzle.position.set(0, 0.012, -0.56);
-  nozzle.visible = false;
-  gun.add(nozzle);
-
-  return gun;
+function addRoundTail(body: THREE.Group, name: string, color: number, size: number, springs: SpringPart[]): void {
+  const tail = springGroup(body, name, 0, 0.47, 0.285, 0, 0.12, springs);
+  tail.add(ellipsoid(size, size, size, color));
 }
 
-function addWetDrops(torso: THREE.Mesh): THREE.Mesh[] {
-  const drops: THREE.Mesh[] = [];
-  const mat = new THREE.MeshBasicMaterial({ color: 0x42c5ff, transparent: true, opacity: 0 });
-  const positions: Array<[number, number, number, number]> = [
-    [-0.14, 0.16, -0.235, 1.1],
-    [0.08, -0.02, -0.245, 0.85],
-    [0.17, 0.27, -0.22, 0.7],
+function addWetDrops(body: THREE.Group, head: THREE.Group, material: THREE.MeshBasicMaterial, headZ: number): WetDrop[] {
+  const geometry = sharedGeometry('mascot-wet-drop', () => new THREE.SphereGeometry(0.5, 10, 8));
+  const drops: WetDrop[] = [];
+  const places: Array<[THREE.Group, number, number, number, number]> = [
+    [body, -0.12, 0.77, -0.32, 1],
+    [body, 0.11, 0.57, -0.306, 0.8],
+    [head, 0.285, 0.16, headZ, 0.7],
   ];
-
-  for (const [x, y, z, scale] of positions) {
-    const drop = mesh(GEOMETRIES.waterDrop, mat);
-    drop.position.set(x, y, z);
-    drop.scale.set(0.8 * scale, 1.25 * scale, 0.45 * scale);
-    drop.userData.baseScale = drop.scale.clone();
-    drop.userData.kind = 'wet-drop';
-    drop.visible = false;
-    torso.add(drop);
-    drops.push(drop);
+  for (const [parent, x, y, z, size] of places) {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = `mascot-wet-drop-${drops.length}`;
+    mesh.userData.kind = 'wet-drop';
+    mesh.position.set(x, y, z);
+    mesh.scale.set(0.07 * size, 0.12 * size, 0.035 * size);
+    mesh.visible = false;
+    parent.add(mesh);
+    drops.push({ mesh, x: mesh.scale.x, y: mesh.scale.y, z: mesh.scale.z });
   }
-
   return drops;
 }
 
-function paletteFor(skin: SkinConfig): SkinPalette {
-  const palettes: Record<SkinId, SkinPalette> = {
-    kuma: { face: 0xffd8b5, hair: 0x5b3a24, shirt: skin.color, shorts: 0x345995, shoes: 0x4a2c21 },
-    usagi: { face: 0xffdfc8, hair: 0x6d4c41, shirt: skin.color, shorts: 0xffffff, shoes: 0xd17da3 },
-    neko: { face: 0xf3c6a7, hair: 0x222222, shirt: skin.color, shorts: 0x6c63ff, shoes: 0x111111 },
-    robo: { face: 0xd9f5ff, hair: 0x90a4ae, shirt: skin.color, shorts: 0x1976d2, shoes: 0x455a64 },
-    sakana: { face: 0xffd4b8, hair: 0x1e88e5, shirt: skin.color, shorts: 0xff8a65, shoes: 0x006064 },
-  };
-  return palettes[skin.id];
-}
-
-function mesh<T extends THREE.BufferGeometry>(geometry: T, material: THREE.Material): THREE.Mesh<T, THREE.Material> {
-  const m = new THREE.Mesh(geometry, material);
-  m.castShadow = false;
-  m.receiveShadow = false;
-  return m;
-}
-
-function lambert(color: number): THREE.MeshLambertMaterial {
-  const key = `lambert:${color.toString(16)}`;
-  const cached = materialCache.get(key);
-  if (cached instanceof THREE.MeshLambertMaterial) return cached;
-  const mat = new THREE.MeshLambertMaterial({ color });
-  materialCache.set(key, mat);
-  return mat;
-}
-
-function basic(color: number, opacity = 1): THREE.MeshBasicMaterial {
-  const key = `basic:${color.toString(16)}:${opacity}`;
-  const cached = materialCache.get(key);
-  if (cached instanceof THREE.MeshBasicMaterial) return cached;
-  const mat = new THREE.MeshBasicMaterial({
-    color,
-    transparent: opacity < 1,
-    opacity,
+function rabbitEarGeometry(): THREE.BufferGeometry {
+  return sharedGeometry('mascot-rabbit-soft-ear', () => {
+    const shape = new THREE.Shape();
+    shape.moveTo(-0.073, 0);
+    shape.bezierCurveTo(-0.12, 0.24, -0.07, 0.53, 0.025, 0.55);
+    shape.bezierCurveTo(0.15, 0.55, 0.12, 0.23, 0.07, 0);
+    shape.quadraticCurveTo(0, -0.045, -0.073, 0);
+    const geometry = new THREE.ExtrudeGeometry(shape, {
+      depth: 0.065, steps: 1, bevelEnabled: true, bevelThickness: 0.035, bevelSize: 0.025, bevelSegments: 2, curveSegments: 10,
+    });
+    geometry.translate(0, 0, -0.035);
+    return geometry;
   });
-  materialCache.set(key, mat);
-  return mat;
+}
+
+function catEarGeometry(): THREE.BufferGeometry {
+  return sharedGeometry('mascot-cat-rounded-ear', () => {
+    const shape = new THREE.Shape();
+    shape.moveTo(-0.125, 0);
+    shape.quadraticCurveTo(-0.14, 0.04, -0.025, 0.25);
+    shape.quadraticCurveTo(0.005, 0.3, 0.045, 0.24);
+    shape.quadraticCurveTo(0.16, 0.04, 0.125, 0);
+    shape.quadraticCurveTo(0, -0.04, -0.125, 0);
+    const geometry = new THREE.ExtrudeGeometry(shape, {
+      depth: 0.075, steps: 1, bevelEnabled: true, bevelThickness: 0.035, bevelSize: 0.025, bevelSegments: 2, curveSegments: 8,
+    });
+    geometry.translate(0, 0, -0.04);
+    return geometry;
+  });
+}
+
+function finGeometry(): THREE.BufferGeometry {
+  return sharedGeometry('mascot-soft-fin', () => {
+    const shape = new THREE.Shape();
+    shape.moveTo(-0.1, 0);
+    shape.bezierCurveTo(-0.16, 0.12, -0.09, 0.3, -0.005, 0.28);
+    shape.bezierCurveTo(0.045, 0.18, 0.17, 0.11, 0.14, 0.04);
+    shape.quadraticCurveTo(0.07, -0.02, -0.1, 0);
+    const geometry = new THREE.ExtrudeGeometry(shape, {
+      depth: 0.035, steps: 1, bevelEnabled: true, bevelThickness: 0.022, bevelSize: 0.018, bevelSegments: 2, curveSegments: 8,
+    });
+    geometry.translate(0, 0, -0.018);
+    return geometry;
+  });
+}
+
+function group(name: string, parent: THREE.Object3D): THREE.Group {
+  const pivot = new THREE.Group();
+  pivot.name = name;
+  parent.add(pivot);
+  return pivot;
+}
+
+function springGroup(
+  parent: THREE.Group, name: string, x: number, y: number, z: number, restZ: number, amount: number, springs: SpringPart[],
+): THREE.Group {
+  const pivot = group(name, parent);
+  pivot.position.set(x, y, z);
+  pivot.rotation.z = restZ;
+  springs.push({ pivot, restZ, amount, phase: x < 0 ? 1.5 : 0 });
+  return pivot;
 }

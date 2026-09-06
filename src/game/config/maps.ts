@@ -1,65 +1,47 @@
 import type { MapConfig } from '@/types';
 
+// Broad spokes connect every start to a clear central plaza. Tall scenery sits
+// toward the edge; the final ten-metre circle never contains a solid landmark.
+const cream = 0xf8dfac;
+const aqua = 0x2eaebd;
+const coral = 0xef7567;
+const yellow = 0xf2be48;
+const mint = 0x65b890;
+
 const poolPark: MapConfig = {
   id: 'pool-park',
   nameHiragana: 'プールパーク',
   emoji: '🏊',
-  groundColor: 0x7ec8a9,
-  groundAccentColor: 0x9fdcbb,
-  skyColor: 0xcdf1ff,
-  skyTopColor: 0x4fa8e8,
+  theme: 'pool',
+  groundColor: 0x80b9a8,
+  groundAccentColor: cream,
+  skyColor: 0xe0f3ee,
+  skyTopColor: 0x82c7e5,
   sizeMeters: 90,
   spawnPoints: [
-    [0, -24], [0, 24], [-24, 0], [24, 0],
-    [-16, -16], [16, 16], [14, -14], [-14, 14],
+    [0, -35], [0, 35], [-35, 0], [35, 0],
+    [-27, -27], [27, -27], [-27, 27], [27, 27],
   ],
-  waterTanks: [
-    [0, 0], [-15, 15], [15, -15], [-15, -15], [15, 15],
-  ],
-  weaponChests: [
-    [-20, 0], [20, 0], [0, -20], [0, 20],
-  ],
-  woodNodes: [
-    [-25, 5], [25, -5], [10, 25], [-10, -25],
-  ],
-  stoneNodes: [
-    [-5, 25], [5, -25], [25, 10], [-25, -10],
-  ],
+  waterTanks: [[0, 0], [-23, 6], [23, -6], [-7, -26], [7, 26]],
+  weaponChests: [[-28, 0], [28, 0], [0, -28], [0, 28]],
+  woodNodes: [[-22, -18], [22, 18], [-17, 27], [17, -27]],
+  stoneNodes: [[-22, 18], [22, -18], [-17, -27], [17, 27]],
   decorations: [
-    // まんなかの大きなプール
-    { kind: 'box', position: [0, 0.35, 0], size: [14, 0.7, 14], color: 0x4fc3f7 },
-    { kind: 'box', position: [0, 0.9, -7.4], size: [15, 1.8, 1.2], color: 0xfff3d6 },
-    { kind: 'box', position: [0, 0.9, 7.4], size: [15, 1.8, 1.2], color: 0xfff3d6 },
-    { kind: 'box', position: [-7.4, 0.9, 0], size: [1.2, 1.8, 15], color: 0xfff3d6 },
-    { kind: 'box', position: [7.4, 0.9, 0], size: [1.2, 1.8, 15], color: 0xfff3d6 },
-    // ウォータースライダーのやぐら
-    { kind: 'box', position: [-18, 3, 18], size: [5, 6, 5], color: 0xffb56b },
-    { kind: 'pyramid', position: [-18, 7.6, 18], size: [7, 3.2, 7], color: 0xff7043 },
-    { kind: 'box', position: [18, 3, -18], size: [5, 6, 5], color: 0x9fd6ff },
-    { kind: 'pyramid', position: [18, 7.6, -18], size: [7, 3.2, 7], color: 0x42a5f5 },
-    // パラソルと売店
-    { kind: 'cylinder', position: [-18, 1.4, -18], size: [1, 2.8, 1], color: 0xfff3d6 },
-    { kind: 'pyramid', position: [-18, 3.5, -18], size: [6, 1.6, 6], color: 0xff8a80 },
-    { kind: 'cylinder', position: [18, 1.4, 18], size: [1, 2.8, 1], color: 0xfff3d6 },
-    { kind: 'pyramid', position: [18, 3.5, 18], size: [6, 1.6, 6], color: 0xffe066 },
-    // かくれられるブロック
-    { kind: 'box', position: [-27, 1.3, -6], size: [2.6, 2.6, 9], color: 0xffe3bd },
-    { kind: 'box', position: [27, 1.3, 6], size: [2.6, 2.6, 9], color: 0xffe3bd },
-    { kind: 'box', position: [0, 1.3, 30], size: [15, 2.6, 2.4], color: 0xffd0a3 },
-    { kind: 'box', position: [0, 1.3, -30], size: [15, 2.6, 2.4], color: 0xffd0a3 },
-    { kind: 'box', position: [-30, 2.2, 28], size: [6, 4.4, 6], color: 0xb39ddb },
-    { kind: 'box', position: [30, 2.2, -28], size: [6, 4.4, 6], color: 0x80cbc4 },
-    { kind: 'cylinder', position: [-10, 2, -34], size: [3, 4, 3], color: 0xf48fb1 },
-    { kind: 'cylinder', position: [10, 2, 34], size: [3, 4, 3], color: 0xf48fb1 },
-  ],
-  scatter: [
-    { kind: 'tree', count: 54, color: 0x4caf50, radius: [50, 100], scale: [1.1, 2.2] },
-    { kind: 'tree', count: 10, color: 0x66bb6a, radius: [34, 42], scale: [0.8, 1.2] },
-    { kind: 'bush', count: 30, color: 0x66bb6a, radius: [20, 44], scale: [0.5, 0.9] },
-    { kind: 'flower', count: 90, color: 0xffd166, radius: [10, 44], scale: [0.7, 1.2] },
-    { kind: 'flower', count: 50, color: 0xff8fb1, radius: [12, 42], scale: [0.6, 1.1] },
-    { kind: 'ball', count: 14, color: 0xff7043, radius: [10, 36], scale: [0.7, 1.1] },
-    { kind: 'floaty', count: 8, color: 0x4fc3f7, radius: [4.5, 6.5], scale: [1, 1.4], height: 0.72 },
+    // This is a flush splash-pad mosaic, not a pool to fall into or swim in.
+    { kind: 'splash-pad', position: [0, 0, 0], size: [18, 0.03, 18], color: aqua, accent: cream },
+    { kind: 'fountain-pipes', position: [-11, 0, 7], size: [4, 4.7, 2], color: coral, accent: yellow },
+    { kind: 'fountain-pipes', position: [11, 0, -7], size: [4, 4.7, 2], color: aqua, accent: yellow, quarterTurns: 2 },
+    { kind: 'inflatable', position: [-17, 0, -10], size: [6, 2.3, 3.2], color: yellow, accent: cream },
+    { kind: 'inflatable', position: [17, 0, 10], size: [6, 2.3, 3.2], color: coral, accent: cream },
+    { kind: 'inflatable', position: [-10, 0, 18], size: [5, 2.1, 3.2], color: aqua, accent: cream, quarterTurns: 1 },
+    { kind: 'inflatable', position: [10, 0, -18], size: [5, 2.1, 3.2], color: mint, accent: cream, quarterTurns: 1 },
+    { kind: 'parasol', position: [-31, 0, -17], size: [8, 6.2, 8], color: coral, accent: cream },
+    { kind: 'parasol', position: [31, 0, 17], size: [8, 6.2, 8], color: yellow, accent: cream },
+    { kind: 'parasol', position: [-31, 0, 17], size: [8, 6.2, 8], color: aqua, accent: cream },
+    { kind: 'parasol', position: [31, 0, -17], size: [8, 6.2, 8], color: mint, accent: cream },
+    // Closed display rides are beyond the fence, with no climbable entrance.
+    { kind: 'slide-tower', position: [-55, 0, -25], size: [10, 17, 10], color: coral, accent: aqua },
+    { kind: 'slide-tower', position: [55, 0, 25], size: [10, 17, 10], color: aqua, accent: yellow },
   ],
 };
 
@@ -67,62 +49,35 @@ const castleGarden: MapConfig = {
   id: 'castle-garden',
   nameHiragana: 'おしろのおにわ',
   emoji: '🏰',
-  groundColor: 0x86c86e,
-  groundAccentColor: 0xa8dd8c,
-  skyColor: 0xd6efff,
-  skyTopColor: 0x3f8fd8,
+  theme: 'castle',
+  groundColor: 0x85b577,
+  groundAccentColor: cream,
+  skyColor: 0xe5f0ed,
+  skyTopColor: 0x99cce2,
   sizeMeters: 100,
   spawnPoints: [
-    [0, -38], [0, 38], [-38, 0], [38, 0],
-    [-26, -26], [26, -26], [-26, 26], [26, 26],
+    [0, -39], [0, 39], [-39, 0], [39, 0],
+    [-32, -32], [32, -32], [-32, 32], [32, 32],
   ],
-  waterTanks: [
-    [0, 0], [-20, 20], [20, -20], [20, 20], [-20, -20],
-  ],
-  weaponChests: [
-    [-25, 0], [25, 0], [0, -25], [0, 25],
-  ],
-  woodNodes: [
-    [-15, -15], [15, 15], [-30, 10], [30, -10], [10, -30], [-10, 30],
-  ],
-  stoneNodes: [
-    [-15, 15], [15, -15], [-30, -10], [30, 10],
-  ],
+  waterTanks: [[0, 0], [-23, -9], [23, -9], [-18, 24], [18, 24]],
+  weaponChests: [[-28, 0], [28, 0], [0, -31], [0, 29]],
+  woodNodes: [[-31, -18], [31, 18], [-12, 32], [8, -35], [-38, 14], [38, -14]],
+  stoneNodes: [[31, -18], [-31, 18], [12, 32], [-8, -35]],
   decorations: [
-    // 中央のおしろ
-    { kind: 'box', position: [0, 4, 0], size: [12, 8, 12], color: 0xf0e2c0 },
-    { kind: 'pyramid', position: [0, 11, 0], size: [11, 5, 11], color: 0xef5350 },
-    { kind: 'cylinder', position: [-6, 6, -6], size: [2.4, 12, 2.4], color: 0xfaf3e0 },
-    { kind: 'pyramid', position: [-6, 13.4, -6], size: [3.6, 3, 3.6], color: 0x42a5f5 },
-    { kind: 'cylinder', position: [6, 6, -6], size: [2.4, 12, 2.4], color: 0xfaf3e0 },
-    { kind: 'pyramid', position: [6, 13.4, -6], size: [3.6, 3, 3.6], color: 0x42a5f5 },
-    { kind: 'cylinder', position: [-6, 6, 6], size: [2.4, 12, 2.4], color: 0xfaf3e0 },
-    { kind: 'pyramid', position: [-6, 13.4, 6], size: [3.6, 3, 3.6], color: 0x42a5f5 },
-    { kind: 'cylinder', position: [6, 6, 6], size: [2.4, 12, 2.4], color: 0xfaf3e0 },
-    { kind: 'pyramid', position: [6, 13.4, 6], size: [3.6, 3, 3.6], color: 0x42a5f5 },
-    // 生けがき
-    { kind: 'box', position: [-20, 1.4, 0], size: [4, 2.8, 30], color: 0x5d9c4a },
-    { kind: 'box', position: [20, 1.4, 0], size: [4, 2.8, 30], color: 0x5d9c4a },
-    { kind: 'box', position: [0, 1.4, -25], size: [40, 2.8, 3], color: 0x5d9c4a },
-    { kind: 'box', position: [0, 1.4, 25], size: [40, 2.8, 3], color: 0x5d9c4a },
-    // 見はりとう
-    { kind: 'cylinder', position: [-32, 3.5, -32], size: [5, 7, 5], color: 0xe8d9b5 },
-    { kind: 'pyramid', position: [-32, 8.5, -32], size: [7, 3, 7], color: 0xab47bc },
-    { kind: 'cylinder', position: [32, 3.5, 32], size: [5, 7, 5], color: 0xe8d9b5 },
-    { kind: 'pyramid', position: [32, 8.5, 32], size: [7, 3, 7], color: 0xab47bc },
-    { kind: 'box', position: [32, 1.6, -32], size: [8, 3.2, 8], color: 0xffcc80 },
-    { kind: 'box', position: [-32, 1.6, 32], size: [8, 3.2, 8], color: 0xffcc80 },
-    // ふんすい
-    { kind: 'cylinder', position: [-14, 0.6, 14], size: [6, 1.2, 6], color: 0x81d4fa },
-    { kind: 'cylinder', position: [14, 0.6, -14], size: [6, 1.2, 6], color: 0x81d4fa },
-  ],
-  scatter: [
-    { kind: 'tree', count: 62, color: 0x388e3c, radius: [56, 112], scale: [1.2, 2.4] },
-    { kind: 'tree', count: 12, color: 0x4caf50, radius: [38, 47], scale: [0.9, 1.3] },
-    { kind: 'bush', count: 38, color: 0x4c9a3f, radius: [16, 47], scale: [0.5, 0.9] },
-    { kind: 'flower', count: 110, color: 0xf06292, radius: [8, 47], scale: [0.7, 1.2] },
-    { kind: 'flower', count: 60, color: 0xfff176, radius: [10, 46], scale: [0.6, 1.1] },
-    { kind: 'ball', count: 12, color: 0xffd54f, radius: [12, 40], scale: [0.7, 1.1] },
+    // The castle frames the north approach; its actual arch is open at y=0.
+    { kind: 'castle-gate', position: [0, 0, -18], size: [22, 11, 4], color: cream, accent: coral },
+    { kind: 'castle-tower', position: [-14, 0, -18], size: [6, 14, 6], color: cream, accent: aqua },
+    { kind: 'castle-tower', position: [14, 0, -18], size: [6, 14, 6], color: cream, accent: coral },
+    { kind: 'castle-tower', position: [-14, 0, -31], size: [5, 11, 5], color: cream, accent: yellow },
+    { kind: 'castle-tower', position: [14, 0, -31], size: [5, 11, 5], color: cream, accent: mint },
+    { kind: 'hedge', position: [-24, 0, 8], size: [8, 1.5, 2.6], color: mint },
+    { kind: 'hedge', position: [24, 0, 8], size: [8, 1.5, 2.6], color: mint },
+    { kind: 'hedge', position: [-9, 0, 22], size: [6, 1.5, 2.6], color: mint, quarterTurns: 1 },
+    { kind: 'hedge', position: [9, 0, 22], size: [6, 1.5, 2.6], color: mint, quarterTurns: 1 },
+    { kind: 'hedge', position: [-32, 0, -7], size: [7, 1.5, 2.6], color: mint },
+    { kind: 'hedge', position: [32, 0, -7], size: [7, 1.5, 2.6], color: mint },
+    { kind: 'fountain', position: [-22, 0, 17], size: [7, 4.2, 7], color: cream, accent: aqua },
+    { kind: 'fountain', position: [22, 0, 17], size: [7, 4.2, 7], color: cream, accent: aqua },
   ],
 };
 
@@ -130,62 +85,37 @@ const cloudPlaza: MapConfig = {
   id: 'cloud-plaza',
   nameHiragana: 'くものうえひろば',
   emoji: '☁️',
-  groundColor: 0xd4dcff,
-  groundAccentColor: 0xffbde6,
-  skyColor: 0xffdff2,
-  skyTopColor: 0x5fa4ea,
+  theme: 'cloud',
+  groundColor: 0xb2cddd,
+  groundAccentColor: cream,
+  skyColor: 0xe9eef5,
+  skyTopColor: 0xa0cddd,
   sizeMeters: 80,
   spawnPoints: [
-    [0, -30], [0, 30], [-30, 0], [30, 0],
-    [-18, -18], [18, -18], [-18, 18], [18, 18],
+    [0, -31], [0, 31], [-31, 0], [31, 0],
+    [-25, -25], [25, -25], [-25, 25], [25, 25],
   ],
-  waterTanks: [
-    [0, 0], [-12, 12], [12, -12], [-12, -12], [12, 12],
-  ],
-  weaponChests: [
-    [-18, 0], [18, 0], [0, -18], [0, 18],
-  ],
-  woodNodes: [
-    [-22, 8], [22, -8], [8, 22], [-8, -22],
-  ],
-  stoneNodes: [
-    [8, 22], [-8, -22], [22, 14], [-22, -14],
-  ],
+  waterTanks: [[0, 0], [-20, 6], [20, -6], [-6, -25], [6, 25]],
+  weaponChests: [[-25, 0], [25, 0], [0, -26], [0, 26]],
+  woodNodes: [[-21, -14], [14, 23], [-15, 26], [20, -23]],
+  stoneNodes: [[-21, 20], [14, -25], [-15, -27], [31, 14]],
   decorations: [
-    // 中央のうかぶ島
-    { kind: 'cylinder', position: [0, 2.5, 0], size: [9, 5, 9], color: 0xd8e6ff },
-    { kind: 'cylinder', position: [0, 5.4, 0], size: [7, 0.8, 7], color: 0xfff6ff },
-    // まわりのくもの足場
-    { kind: 'box', position: [-16, 2.2, 0], size: [6, 1.2, 8], color: 0xe3ecff },
-    { kind: 'box', position: [16, 2.2, 0], size: [6, 1.2, 8], color: 0xe3ecff },
-    { kind: 'box', position: [0, 2.2, -16], size: [8, 1.2, 6], color: 0xe3ecff },
-    { kind: 'box', position: [0, 2.2, 16], size: [8, 1.2, 6], color: 0xe3ecff },
-    // にじ色のとう
-    { kind: 'cylinder', position: [-24, 4, -24], size: [4, 8, 4], color: 0xff8ec6 },
-    { kind: 'pyramid', position: [-24, 9.4, -24], size: [5.6, 3, 5.6], color: 0xfff6ff },
-    { kind: 'cylinder', position: [24, 4, 24], size: [4, 8, 4], color: 0x6ec6ff },
-    { kind: 'pyramid', position: [24, 9.4, 24], size: [5.6, 3, 5.6], color: 0xfff6ff },
-    { kind: 'cylinder', position: [24, 4, -24], size: [4, 8, 4], color: 0xb388ff },
-    { kind: 'pyramid', position: [24, 9.4, -24], size: [5.6, 3, 5.6], color: 0xfff6ff },
-    { kind: 'cylinder', position: [-24, 4, 24], size: [4, 8, 4], color: 0xffd54f },
-    { kind: 'pyramid', position: [-24, 9.4, 24], size: [5.6, 3, 5.6], color: 0xfff6ff },
-    // かくれられるくも（見とおしをふさがない大きさにする）
-    { kind: 'sphere', position: [-11, 1.6, -11], size: [5, 5, 5], color: 0xeef3ff },
-    { kind: 'sphere', position: [11, 1.8, 11], size: [5.4, 5.4, 5.4], color: 0xeef3ff },
-    { kind: 'sphere', position: [-14, 1.6, 14], size: [4.4, 4.4, 4.4], color: 0xffe9f7 },
-    { kind: 'sphere', position: [14, 1.6, -14], size: [4.4, 4.4, 4.4], color: 0xffe9f7 },
-  ],
-  scatter: [
-    { kind: 'cloudlet', count: 46, color: 0xffffff, radius: [46, 92], scale: [1, 2.4] },
-    { kind: 'cloudlet', count: 14, color: 0xf4f8ff, radius: [18, 36], scale: [0.45, 0.7] },
-    { kind: 'flower', count: 80, color: 0xff5fa8, radius: [8, 37], scale: [0.7, 1.1] },
-    { kind: 'ball', count: 16, color: 0x8f5cff, radius: [10, 35], scale: [0.7, 1.1] },
-    { kind: 'bush', count: 18, color: 0x7fb6ff, radius: [14, 35], scale: [0.5, 0.85] },
+    { kind: 'rainbow-gate', position: [0, 0, -18], size: [18, 12, 2.4], color: coral, accent: yellow },
+    { kind: 'rainbow-gate', position: [25, 0, 14], size: [14, 10, 2.4], color: aqua, accent: mint, quarterTurns: 1 },
+    { kind: 'cloud-cover', position: [-13, 0, -10], size: [6, 2.5, 3.8], color: cream, accent: aqua },
+    { kind: 'cloud-cover', position: [13, 0, 10], size: [6, 2.5, 3.8], color: cream, accent: coral },
+    { kind: 'cloud-cover', position: [-13, 0, 13], size: [5, 2.3, 3.6], color: cream, accent: yellow },
+    { kind: 'cloud-cover', position: [14, 0, -9], size: [5, 2.3, 3.6], color: cream, accent: mint },
+    { kind: 'cloud-cover', position: [-29, 0, -9], size: [5, 2.3, 3.6], color: cream, accent: mint, quarterTurns: 1 },
+    // Balloon baskets are scenery outside the continuous, fenced play floor.
+    { kind: 'balloon', position: [-48, 7, -23], size: [10, 20, 10], color: coral, accent: cream },
+    { kind: 'balloon', position: [48, 9, 22], size: [10, 20, 10], color: aqua, accent: cream },
+    { kind: 'balloon', position: [20, 12, -52], size: [8, 16, 8], color: yellow, accent: cream },
   ],
 };
 
 export const MAPS: MapConfig[] = [poolPark, castleGarden, cloudPlaza];
 
 export function getMapById(id: string): MapConfig {
-  return MAPS.find((m) => m.id === id) ?? MAPS[0];
+  return MAPS.find((map) => map.id === id) ?? MAPS[0];
 }

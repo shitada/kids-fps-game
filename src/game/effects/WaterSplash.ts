@@ -10,149 +10,173 @@ interface SplashParticle {
 }
 
 const MAX_PARTICLES = 220;
-const HIDDEN_SCALE = 0.0001;
+const MAX_RINGS = 24;
+const MAX_CLOUDS = 7;
 
-/**
- * みずしぶきのパーティクル。
- * InstancedMesh + 固定長プールなので、毎フレームの new を出さない。
- */
 export class WaterSplashPool {
-  private scene: THREE.Scene;
   private mesh: THREE.InstancedMesh;
   private ringMesh: THREE.InstancedMesh;
-  private particles: SplashParticle[] = [];
-  private rings: Array<{ life: number; max: number; position: THREE.Vector3; radius: number }> = [];
+  private cloudMesh: THREE.InstancedMesh;
+  private particles: SplashParticle[] = Array.from({ length: MAX_PARTICLES }, () => ({
+    life: 1, max: 1, spin: 0, baseScale: 1, velocity: new THREE.Vector3(), position: new THREE.Vector3(),
+  }));
+  private rings = Array.from({ length: MAX_RINGS }, () => ({
+    life: 1, max: 1, position: new THREE.Vector3(), radius: 1,
+  }));
+  private clouds = Array.from({ length: MAX_CLOUDS }, () => ({
+    life: 1, max: 1, position: new THREE.Vector3(),
+  }));
   private dummy = new THREE.Object3D();
   private color = new THREE.Color();
-  private tmp = new THREE.Vector3();
+  private cursor = 0;
 
-  constructor(scene: THREE.Scene) {
-    this.scene = scene;
-    const geo = new THREE.SphereGeometry(0.2, 6, 5);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.92, depthWrite: false });
-    this.mesh = new THREE.InstancedMesh(geo, mat, MAX_PARTICLES);
+  constructor(private scene: THREE.Scene) {
+    this.mesh = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(0.12, 8, 6),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.23, metalness: 0, envMapIntensity: 0.6 }),
+      MAX_PARTICLES,
+    );
     this.mesh.name = 'water-splash-pool';
-    this.mesh.frustumCulled = false;
-    this.mesh.count = 0;
-    scene.add(this.mesh);
-
-    const ringGeo = new THREE.RingGeometry(0.5, 0.85, 16);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xbdefff,
-      transparent: true,
-      opacity: 0.6,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    this.ringMesh = new THREE.InstancedMesh(ringGeo, ringMat, 24);
+    this.ringMesh = new THREE.InstancedMesh(
+      new THREE.TorusGeometry(0.7, 0.035, 5, 24),
+      new THREE.MeshBasicMaterial({ color: 0xcaf8ff, transparent: true, opacity: 0.72, depthWrite: false }),
+      MAX_RINGS,
+    );
     this.ringMesh.name = 'water-splash-rings';
-    this.ringMesh.frustumCulled = false;
-    this.ringMesh.count = 0;
-    scene.add(this.ringMesh);
+    this.cloudMesh = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(1, 10, 7),
+      new THREE.MeshBasicMaterial({ color: 0xf7ffff }),
+      MAX_CLOUDS * 5,
+    );
+    this.cloudMesh.name = 'farewell-clouds';
+    for (const mesh of [this.mesh, this.ringMesh, this.cloudMesh]) {
+      mesh.frustumCulled = false;
+      mesh.count = 0;
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      scene.add(mesh);
+    }
   }
 
   burst(position: THREE.Vector3, count = 8, force = 4): void {
-    const spawn = Math.min(count, MAX_PARTICLES - this.particles.length);
-    for (let i = 0; i < spawn; i++) {
+    let spawned = 0;
+    for (let searched = 0; searched < MAX_PARTICLES && spawned < count; searched++) {
+      const p = this.particles[this.cursor++ % MAX_PARTICLES];
+      if (p.life < p.max) continue;
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.random() * Math.PI * 0.5;
-      const cosPhi = Math.cos(phi);
-      this.particles.push({
-        life: 0,
-        max: 0.42 + Math.random() * 0.3,
-        spin: Math.random() * Math.PI,
-        baseScale: 0.7 + Math.random() * 0.9,
-        velocity: new THREE.Vector3(Math.cos(theta) * cosPhi, Math.sin(phi) + 0.6, Math.sin(theta) * cosPhi).multiplyScalar(force),
-        position: position.clone(),
-      });
+      p.life = 0;
+      p.max = 0.42 + Math.random() * 0.3;
+      p.spin = theta;
+      p.baseScale = 0.7 + Math.random() * 0.9;
+      p.position.copy(position);
+      p.velocity.set(Math.cos(theta) * Math.cos(phi), Math.sin(phi) + 0.6, Math.sin(theta) * Math.cos(phi)).multiplyScalar(force);
+      spawned++;
     }
-    if (this.rings.length < 24 && count >= 6) {
-      this.rings.push({ life: 0, max: 0.36, position: position.clone(), radius: 0.5 + force * 0.16 });
+    if (count >= 6) {
+      const ring = this.rings.find((r) => r.life >= r.max);
+      if (ring) {
+        ring.life = 0;
+        ring.max = 0.42;
+        ring.position.copy(position);
+        ring.radius = 0.5 + force * 0.16;
+      }
     }
+  }
+
+  cloudBurst(position: THREE.Vector3): void {
+    const cloud = this.clouds.find((c) => c.life >= c.max);
+    if (!cloud) return;
+    cloud.position.copy(position);
+    cloud.position.y += 0.8;
+    cloud.life = 0;
+    cloud.max = 1.2;
+    this.burst(cloud.position, 18, 6);
   }
 
   update(dt: number): void {
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      const p = this.particles[i];
+    let particleIndex = 0;
+    for (const p of this.particles) {
+      if (p.life >= p.max) continue;
       p.life += dt;
-      if (p.life >= p.max) {
-        this.particles.splice(i, 1);
-        continue;
-      }
+      if (p.life >= p.max) continue;
       p.velocity.y -= 11 * dt;
       p.position.addScaledVector(p.velocity, dt);
-      if (p.position.y < 0.05) {
-        p.position.y = 0.05;
-        p.velocity.set(p.velocity.x * 0.4, Math.abs(p.velocity.y) * 0.24, p.velocity.z * 0.4);
+      if (p.position.y < 0.06) {
+        p.position.y = 0.06;
+        p.velocity.y = Math.abs(p.velocity.y) * 0.24;
       }
-    }
-
-    for (let i = this.rings.length - 1; i >= 0; i--) {
-      const r = this.rings[i];
-      r.life += dt;
-      if (r.life >= r.max) this.rings.splice(i, 1);
-    }
-
-    this.writeParticles();
-    this.writeRings();
-  }
-
-  private writeParticles(): void {
-    const count = this.particles.length;
-    for (let i = 0; i < count; i++) {
-      const p = this.particles[i];
       const t = p.life / p.max;
-      // 暗くして消すと灰色のゴミに見えるので、ふくらんでから小さくして消す
-      const grow = t < 0.25 ? 0.6 + (t / 0.25) * 0.7 : 1.3;
-      const shrink = t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4;
-      const scale = p.baseScale * grow * shrink;
+      const scale = p.baseScale * (1 - t * t);
       this.dummy.position.copy(p.position);
-      this.dummy.rotation.set(p.spin, p.spin * 1.4, 0);
-      this.dummy.scale.setScalar(Math.max(HIDDEN_SCALE, scale));
+      this.dummy.rotation.set(p.spin + t * 2, p.spin, 0);
+      this.dummy.scale.set(scale * 0.75, scale * 1.65, scale * 0.75);
       this.dummy.updateMatrix();
-      this.mesh.setMatrixAt(i, this.dummy.matrix);
-      // 出はじめは白、そのあと水色。明るさは保ったままにする。
-      const fade = 1 - t;
-      this.color.setRGB(0.62 + fade * 0.38, 0.9 + fade * 0.1, 1);
-      this.mesh.setColorAt(i, this.color);
+      this.mesh.setMatrixAt(particleIndex, this.dummy.matrix);
+      this.color.setHex(particleIndex % 3 === 0 ? 0xf3ffff : 0x73d8eb);
+      this.mesh.setColorAt(particleIndex++, this.color);
     }
-    this.mesh.count = count;
+    this.mesh.count = particleIndex;
     this.mesh.instanceMatrix.needsUpdate = true;
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
-  }
 
-  private writeRings(): void {
-    const count = this.rings.length;
-    for (let i = 0; i < count; i++) {
-      const r = this.rings[i];
-      const t = r.life / r.max;
-      this.tmp.copy(r.position);
-      this.tmp.y = Math.max(0.06, this.tmp.y - 0.1);
-      this.dummy.position.copy(this.tmp);
+    let ringIndex = 0;
+    for (const ring of this.rings) {
+      if (ring.life >= ring.max) continue;
+      ring.life += dt;
+      if (ring.life >= ring.max) continue;
+      const t = ring.life / ring.max;
+      this.dummy.position.copy(ring.position);
+      this.dummy.position.y = Math.max(0.07, ring.position.y - 0.1);
       this.dummy.rotation.set(-Math.PI / 2, 0, 0);
-      this.dummy.scale.setScalar(Math.max(HIDDEN_SCALE, r.radius * (0.4 + t * 1.8) * (1 - t * 0.55)));
+      const size = ring.radius * (0.35 + t * 1.8);
+      this.dummy.scale.set(size, size, Math.max(0.01, 1 - t));
       this.dummy.updateMatrix();
-      this.ringMesh.setMatrixAt(i, this.dummy.matrix);
-      this.color.setRGB(0.78, 0.96, 1);
-      this.ringMesh.setColorAt(i, this.color);
+      this.ringMesh.setMatrixAt(ringIndex++, this.dummy.matrix);
     }
-    this.ringMesh.count = count;
+    this.ringMesh.count = ringIndex;
     this.ringMesh.instanceMatrix.needsUpdate = true;
-    if (this.ringMesh.instanceColor) this.ringMesh.instanceColor.needsUpdate = true;
+
+    let cloudIndex = 0;
+    for (const cloud of this.clouds) {
+      if (cloud.life >= cloud.max) continue;
+      cloud.life += dt;
+      if (cloud.life >= cloud.max) continue;
+      const t = cloud.life / cloud.max;
+      const envelope = Math.sin(Math.PI * t) * 0.8;
+      for (let i = 0; i < 5; i++) {
+        const angle = i * Math.PI * 0.4;
+        this.dummy.position.set(
+          cloud.position.x + Math.cos(angle) * t,
+          cloud.position.y + t * 1.4 + Math.sin(angle) * 0.24,
+          cloud.position.z + Math.sin(angle) * t * 0.65,
+        );
+        this.dummy.rotation.set(0, 0, 0);
+        this.dummy.scale.set(envelope, envelope * 0.8, envelope);
+        this.dummy.updateMatrix();
+        this.cloudMesh.setMatrixAt(cloudIndex++, this.dummy.matrix);
+      }
+    }
+    this.cloudMesh.count = cloudIndex;
+    this.cloudMesh.instanceMatrix.needsUpdate = true;
   }
 
   get activeCount(): number {
-    return this.particles.length;
+    let count = 0;
+    for (const p of this.particles) if (p.life < p.max) count++;
+    return count;
   }
 
   dispose(): void {
-    this.scene.remove(this.mesh);
-    this.scene.remove(this.ringMesh);
-    this.mesh.geometry.dispose();
-    this.ringMesh.geometry.dispose();
-    (this.mesh.material as THREE.Material).dispose();
-    (this.ringMesh.material as THREE.Material).dispose();
-    this.particles.length = 0;
-    this.rings.length = 0;
+    for (const mesh of [this.mesh, this.ringMesh, this.cloudMesh]) {
+      this.scene.remove(mesh);
+      mesh.dispose();
+      mesh.geometry.dispose();
+      const material = mesh.material;
+      if (Array.isArray(material)) material.forEach((m) => m.dispose());
+      else material.dispose();
+    }
+    for (const particle of this.particles) particle.life = particle.max;
+    for (const ring of this.rings) ring.life = ring.max;
+    for (const cloud of this.clouds) cloud.life = cloud.max;
   }
 }
